@@ -1,15 +1,27 @@
-import { Scene, SceneNode } from '../types/scene';
+import { Scene, SceneNode, Layer } from '../types/scene';
 
 let _idCounter = 0;
 export function generateId(): string {
   return `node_${Date.now()}_${_idCounter++}`;
 }
 
+export function createLayer(name: string): Layer {
+  return {
+    id: `layer_${Date.now()}_${_idCounter++}`,
+    name,
+    visible: true,
+    locked: false,
+    opacity: 1,
+  };
+}
+
 export function createScene(): Scene {
+  const baseLayer = createLayer('Layer 1');
   return {
     id: generateId(),
     nodes: [],
     background: '#f8f7f4',
+    layers: [baseLayer],
   };
 }
 
@@ -30,10 +42,15 @@ export function createNode(
   };
 }
 
-export function addNode(scene: Scene, node: SceneNode): Scene {
+export function addNode(scene: Scene, node: SceneNode, layerId?: string): Scene {
+  // Ensure scene has at least one layer; assign node to active layer if not set.
+  const layers = ensureLayers(scene);
+  const targetLayerId = node.layerId ?? layerId ?? layers[0].id;
+  const newNode = node.layerId ? node : { ...node, layerId: targetLayerId };
   return {
     ...scene,
-    nodes: [...scene.nodes, node],
+    layers,
+    nodes: [...scene.nodes, newNode],
   };
 }
 
@@ -55,6 +72,11 @@ export function getNode(scene: Scene, nodeId: string): SceneNode | undefined {
   return scene.nodes.find((n) => n.id === nodeId);
 }
 
+export function ensureLayers(scene: Scene): Layer[] {
+  if (scene.layers && scene.layers.length > 0) return scene.layers;
+  return [createLayer('Layer 1')];
+}
+
 // Offscreen canvas used solely for path hit testing.
 let _hitCtx: CanvasRenderingContext2D | null = null;
 function getHitCtx(): CanvasRenderingContext2D | null {
@@ -66,10 +88,20 @@ function getHitCtx(): CanvasRenderingContext2D | null {
   return _hitCtx;
 }
 
-export function getNodeAtPoint(scene: Scene, worldX: number, worldY: number): SceneNode | undefined {
+export function getNodeAtPoint(
+  scene: Scene,
+  worldX: number,
+  worldY: number,
+  ignoreLocked = true,
+): SceneNode | undefined {
   // Iterate in reverse so top-most nodes are hit first
+  const layers = scene.layers;
   for (let i = scene.nodes.length - 1; i >= 0; i--) {
     const node = scene.nodes[i];
+    if (ignoreLocked && layers && node.layerId) {
+      const lay = layers.find(l => l.id === node.layerId);
+      if (lay && (lay.locked || !lay.visible)) continue;
+    }
     if (hitTest(node, worldX, worldY)) {
       return node;
     }
@@ -196,4 +228,78 @@ export function ensureInnerScene(node: SceneNode): SceneNode {
     ...node,
     innerScene: createScene(),
   };
+}
+
+// Walk the root scene and return a flat catalog of all scenes (root + nested),
+// each with a breadcrumb path made of node-id chain and a human label.
+export interface SceneCatalogEntry {
+  scene: Scene;
+  scenePath: string[]; // node-id chain from root to this scene
+  labels: string[];
+}
+
+export function buildSceneCatalog(rootScene: Scene): SceneCatalogEntry[] {
+  const out: SceneCatalogEntry[] = [];
+
+  const walk = (scene: Scene, scenePath: string[], labels: string[]) => {
+    out.push({ scene, scenePath: [...scenePath], labels: [...labels] });
+    for (const n of scene.nodes) {
+      if (n.innerScene) {
+        walk(n.innerScene, [...scenePath, n.id], [...labels, nodeShortLabel(n)]);
+      }
+    }
+  };
+  walk(rootScene, [], ['World']);
+  return out;
+}
+
+export function nodeShortLabel(node: SceneNode): string {
+  if (node.text) return node.text.slice(0, 18) || 'Text';
+  switch (node.type) {
+    case 'path': return 'Drawing';
+    case 'image': return 'Image';
+    case 'rect': return 'Rectangle';
+    case 'circle': return 'Circle';
+    case 'group': return 'Group';
+    default: return 'Object';
+  }
+}
+
+// Walk a scene-id path from the root and return the resolved Scene at each step.
+// If a step fails we return what we have so far.
+export function resolveSceneByPath(rootScene: Scene, scenePath: string[]): Scene[] {
+  const out: Scene[] = [rootScene];
+  let cur: Scene = rootScene;
+  for (const id of scenePath) {
+    const n = cur.nodes.find(nn => nn.id === id);
+    if (!n || !n.innerScene) return out;
+    cur = n.innerScene;
+    out.push(cur);
+  }
+  return out;
+}
+
+// Replace the scene at the end of a given scenePath, returning a new root scene
+// whose internal nodes' innerScene are rebuilt accordingly.
+export function replaceSceneAtPath(rootScene: Scene, scenePath: string[], newScene: Scene): Scene {
+  if (scenePath.length === 0) return newScene;
+
+  const [headId, ...rest] = scenePath;
+  return {
+    ...rootScene,
+    nodes: rootScene.nodes.map(n => {
+      if (n.id !== headId || !n.innerScene) return n;
+      const updated = replaceSceneAtPath(n.innerScene, rest, newScene);
+      return { ...n, innerScene: updated };
+    }),
+  };
+}
+
+// Compute innerScene bounds for a node based on its inner scene's nodes,
+// and cache it on the node for later use during smooth zoom.
+export function withInnerSceneBoundsCached(node: SceneNode): SceneNode {
+  if (!node.innerScene) return node;
+  const bb = getBoundingBox(node.innerScene.nodes);
+  if (bb.width <= 0 || bb.height <= 0) return node;
+  return { ...node, innerSceneBounds: bb };
 }

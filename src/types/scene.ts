@@ -1,4 +1,4 @@
-export type ToolType = 'pen' | 'select' | 'hand' | 'eraser' | 'image' | 'rect' | 'circle' | 'text';
+export type ToolType = 'pen' | 'select' | 'hand' | 'eraser' | 'image' | 'rect' | 'circle' | 'text' | 'pathedit' | 'stamp';
 
 export interface Viewport {
   x: number;   // translation x in pixels
@@ -14,6 +14,35 @@ export interface VectorPath {
   fill: string;
   opacity: number;
   pressureSensitive?: boolean;
+}
+
+export type SymmetryMode = 'off' | 'vertical' | 'horizontal' | 'both' | 'radial4' | 'radial6' | 'radial8';
+
+export interface Hotspot {
+  type: 'text' | 'window';
+  trigger: 'click' | 'doubleclick' | 'hover';
+  content: string;
+  title?: string;
+  width?: number;
+  height?: number;
+}
+
+export interface Portal {
+  targetSceneId: string;
+  targetCamera?: Viewport;
+}
+
+export interface NodeAnimation {
+  type: 'pulse' | 'wobble' | 'float' | 'fade';
+  intensity: number;
+  speed: number;
+}
+
+export interface TextOnPath {
+  text: string;
+  fontSize: number;
+  fontFamily: string;
+  color: string;
 }
 
 export interface SceneNode {
@@ -50,14 +79,67 @@ export interface SceneNode {
   // Optional shared group identity for multi-select grouping
   groupId?: string;
 
+  // Layer assignment (per-scene)
+  layerId?: string;
+
   // Inner scene — content visible when you "enter" this node
   innerScene?: Scene;
+
+  // Cached bounding box of the inner scene's nodes (for smooth zoom transitions)
+  innerSceneBounds?: { x: number; y: number; width: number; height: number };
+
+  // Hotspot UI (popup)
+  hotspot?: Hotspot;
+
+  // Portal to another scene
+  portal?: Portal;
+
+  // Subtle animation when in focus
+  animation?: NodeAnimation;
+
+  // Text rendered along this path's curve
+  textAlongPath?: TextOnPath;
+
+  // Marks reference image (renders below all)
+  isReference?: boolean;
+}
+
+export interface Layer {
+  id: string;
+  name: string;
+  visible: boolean;
+  locked: boolean;
+  opacity: number;
+}
+
+export interface SceneAudio {
+  src: string;     // data URL
+  volume: number;  // 0..1
+  loop: boolean;
+}
+
+export interface Camera {
+  id: string;
+  name: string;
+  viewport: Viewport;
+  scenePath: string[];   // node-id path from root to scene the viewport is in
+  duration: number;      // ms to hold
+  transitionMs: number;  // ms to animate in
+}
+
+export interface StartCamera {
+  viewport: Viewport;
+  scenePath: string[];
 }
 
 export interface Scene {
   id: string;
   nodes: SceneNode[];
   background: string;  // CSS color e.g. '#ffffff'
+  layers?: Layer[];
+  audio?: SceneAudio;
+  cameras?: Camera[];
+  startCamera?: StartCamera;
 }
 
 export interface HistoryEntry {
@@ -70,6 +152,27 @@ export interface SceneLevel {
   parentNodeId: string;   // which node we entered
   label: string;          // display name for breadcrumb
   viewportWhenLeft: Viewport;  // restore when going back
+  enterFromNodeRect?: { x: number; y: number; width: number; height: number; scale: number };
+}
+
+export interface Asset {
+  id: string;
+  name: string;
+  thumbnail: string;        // data URL
+  nodes: SceneNode[];
+  boundingBox: { width: number; height: number };
+  createdAt: number;
+  tags?: string[];
+}
+
+export interface BrushStamp {
+  id: string;
+  name: string;
+  imageData: string;          // data URL of the stamp
+  spacing: number;            // % of size
+  size: number;               // base size in px
+  rotationMode: 'fixed' | 'random' | 'follow';
+  opacity: number;
 }
 
 export interface PersistedState {
@@ -77,4 +180,6 @@ export interface PersistedState {
   rootScene: Scene;
   viewport: Viewport;
   savedAt: number;
+  assets?: Asset[];
+  brushStamps?: BrushStamp[];
 }

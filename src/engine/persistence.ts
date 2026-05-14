@@ -86,8 +86,6 @@ export function importFromFile(): Promise<PersistedState> {
       reader.readAsText(file);
     };
 
-    // If the user cancels the file dialog, the input fires no event.
-    // We give up cleaning up after a long timeout.
     window.addEventListener('focus', () => {
       setTimeout(() => {
         if (!settled && !input.files?.length) {
@@ -100,4 +98,30 @@ export function importFromFile(): Promise<PersistedState> {
 
     input.click();
   });
+}
+
+// ---- Settings (toolbar prefs) ----
+const SETTINGS_KEY = 'endless-paper-settings';
+export interface AppSettings {
+  stabilizer: number;
+  symmetry: 'off' | 'vertical' | 'horizontal' | 'both' | 'radial4' | 'radial6' | 'radial8';
+  symmetryCenter?: { x: number; y: number } | null;
+  miniMapVisible?: boolean;
+  audioMuted?: boolean;
+  showReference?: boolean;
+}
+
+export function loadSettings(): AppSettings {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return defaultSettings();
+    const parsed = JSON.parse(raw);
+    return { ...defaultSettings(), ...parsed };
+  } catch { return defaultSettings(); }
+}
+export function saveSettings(s: AppSettings): void {
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch { /* ignore */ }
+}
+function defaultSettings(): AppSettings {
+  return { stabilizer: 0, symmetry: 'off', symmetryCenter: null, miniMapVisible: true, audioMuted: false, showReference: true };
 }
