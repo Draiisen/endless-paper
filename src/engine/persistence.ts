@@ -2,11 +2,19 @@ import { PersistedState } from '../types/scene';
 
 const STORAGE_KEY = 'endless-paper-autosave';
 
-export function saveToLocalStorage(state: PersistedState): void {
+export function saveToLocalStorage(state: PersistedState): boolean {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch {
-    // localStorage may be full or unavailable; fail silently
+    const json = JSON.stringify(state);
+    if (json.length > 4 * 1024 * 1024) {
+      console.warn('Endless Paper: save data is large (' + Math.round(json.length / 1024) + ' KB). Consider exporting to file.');
+    }
+    localStorage.setItem(STORAGE_KEY, json);
+    return true;
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'QuotaExceededError') {
+      return false;
+    }
+    return false;
   }
 }
 

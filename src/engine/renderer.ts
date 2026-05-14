@@ -2,6 +2,21 @@ import { Scene, SceneNode, Viewport, VectorPath, Layer } from '../types/scene';
 import { LRUImageCache } from './image-cache';
 import { samplePath, pointAtLength, totalPathLength } from './svg-path';
 
+// Path2D LRU cache — avoids recreating Path2D objects every frame
+const path2dCache = new Map<string, Path2D>();
+function getPath2D(d: string): Path2D {
+  let p = path2dCache.get(d);
+  if (!p) {
+    p = new Path2D(d);
+    path2dCache.set(d, p);
+    if (path2dCache.size > 500) {
+      const keys = Array.from(path2dCache.keys()).slice(0, 100);
+      for (const k of keys) path2dCache.delete(k);
+    }
+  }
+  return p;
+}
+
 export interface RenderOptions {
   highlightSelected?: string | Set<string>;
   showGrid?: boolean;
@@ -19,6 +34,11 @@ export interface RenderOptions {
   animationTime?: number;
   // Marks viewer (presentation) mode — hides editor chrome (enter hints, hotspot badges, portal markers, etc are drawn differently)
   viewerMode?: boolean;
+}
+
+function isNodeVisible(node: SceneNode, worldLeft: number, worldTop: number, worldRight: number, worldBottom: number): boolean {
+  return node.x < worldRight && node.x + node.width > worldLeft &&
+         node.y < worldBottom && node.y + node.height > worldTop;
 }
 
 function isSelected(highlight: string | Set<string> | undefined, id: string): boolean {
@@ -47,6 +67,12 @@ export function renderScene(
 
   ctx.save();
   ctx.setTransform(viewport.scale, 0, 0, viewport.scale, viewport.x, viewport.y);
+
+  // Compute world bounds for culling
+  const worldLeft = (-viewport.x) / viewport.scale;
+  const worldTop = (-viewport.y) / viewport.scale;
+  const worldRight = (width - viewport.x) / viewport.scale;
+  const worldBottom = (height - viewport.y) / viewport.scale;
 
   if (showGrid) {
     drawGrid(ctx, viewport, width, height);
@@ -78,6 +104,7 @@ export function renderScene(
       const arr = nodesByLayer.get(layer.id) ?? [];
       for (const node of arr) {
         if (!node.isReference) continue;
+        if (!isNodeVisible(node, worldLeft, worldTop, worldRight, worldBottom)) continue;
         ctx.globalAlpha = layer.opacity * 0.35;
         drawNode(ctx, node, highlightSelected, false, animationTime, viewport.scale, viewerMode);
       }
@@ -92,6 +119,7 @@ export function renderScene(
     if (layer.opacity < 0.999) ctx.globalAlpha = layer.opacity;
     for (const node of arr) {
       if (node.isReference) continue;
+      if (!isNodeVisible(node, worldLeft, worldTop, worldRight, worldBottom)) continue;
       drawNode(ctx, node, highlightSelected, enterHintNodeId === node.id, animationTime, viewport.scale, viewerMode);
     }
     ctx.globalAlpha = 1;
@@ -512,7 +540,7 @@ function drawEnterHint(ctx: CanvasRenderingContext2D, node: SceneNode): void {
 }
 
 function drawVectorPath(ctx: CanvasRenderingContext2D, vp: VectorPath): void {
-  const path2d = new Path2D(vp.d);
+  const path2d = getPath2D(vp.d);
   ctx.globalAlpha = (ctx.globalAlpha) * vp.opacity;
 
   if (vp.fill && vp.fill !== 'none') {

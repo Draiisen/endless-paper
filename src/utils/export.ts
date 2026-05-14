@@ -2,16 +2,22 @@ import { Scene, SceneNode, SceneLevel } from '../types/scene';
 
 export function exportToHTML(rootScene: Scene, _sceneStack: SceneLevel[]): string {
   const sceneData = JSON.stringify(rootScene);
+  const startCameraData = rootScene.startCamera ? JSON.stringify(rootScene.startCamera.viewport) : 'null';
+  const camerasData = rootScene.cameras && rootScene.cameras.length > 0 ? JSON.stringify(rootScene.cameras) : 'null';
 
   const rendererJS = `
 (function() {
   var canvas = document.getElementById('canvas');
   var ctx = canvas.getContext('2d');
   var sceneData = ${sceneData};
+  var startCamera = ${startCameraData};
+  var sceneCameras = ${camerasData};
 
-  var viewport = { x: 0, y: 0, scale: 1 };
+  var defaultVp = startCamera || { x: canvas.width / 2 || window.innerWidth / 2, y: canvas.height / 2 || window.innerHeight / 2, scale: 1 };
+  var viewport = { x: defaultVp.x, y: defaultVp.y, scale: defaultVp.scale };
   var sceneStack = [{ scene: sceneData, label: 'World', parentNodeId: null, viewportWhenLeft: { x: 0, y: 0, scale: 1 } }];
   var selectedNode = null;
+  var activePopup = null;
 
   function resize() {
     canvas.width = window.innerWidth;
@@ -390,7 +396,7 @@ export async function generateThumbnail(scene: Scene, width = 200, height = 150)
   for (const node of scene.nodes) {
     if (node.type === 'path' && node.path) {
       ctx.save();
-      const path2d = new Path2D(node.path.d);
+      const path2d: Path2D = new Path2D(node.path.d);
       if (node.path.stroke && node.path.stroke !== 'none') {
         ctx.strokeStyle = node.path.stroke;
         ctx.lineWidth = node.path.strokeWidth;

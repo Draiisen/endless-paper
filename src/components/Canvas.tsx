@@ -4,12 +4,37 @@ import { renderScene, renderLiveStroke, renderLiveShape, imageCache } from '../e
 import {
   createNode, addNode, removeNode, updateNode,
   getNodeAtPoint, ensureInnerScene, generateId,
-  getNodesInRect,
+  getNodesInRect, getBoundingBox,
 } from '../engine/scene-graph';
 import { screenToWorld } from '../engine/transform';
 import { useGestures } from '../hooks/useGestures';
 import { vectorizeImage } from '../engine/vectorizer';
-import { transformPathCoords } from '../engine/svg-path';
+import { transformPathCoords, parsePathToAnchors, anchorsToPath, PathAnchor } from '../engine/svg-path';
+import { mirroredPaths, mirroredPoints } from '../engine/symmetry';
+
+/** DFS search for a scene by id in the root scene tree. */
+function findSceneById(root: import('../types/scene').Scene, targetId: string): import('../types/scene').Scene | null {
+  if (root.id === targetId) return root;
+  for (const node of root.nodes) {
+    if (node.innerScene) {
+      const found = findSceneById(node.innerScene, targetId);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+/** Find which node in the given scene tree hosts the specified inner scene id. */
+function findNodeHostingScene(root: import('../types/scene').Scene, targetSceneId: string): import('../types/scene').SceneNode | null {
+  for (const node of root.nodes) {
+    if (node.innerScene?.id === targetSceneId) return node;
+    if (node.innerScene) {
+      const found = findNodeHostingScene(node.innerScene, targetSceneId);
+      if (found) return found;
+    }
+  }
+  return null;
+}
 
 export interface CanvasHandle {
   vectorizeSelected: () => Promise<void>;
@@ -64,7 +89,14 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   onSceneChange,
   pressureEnabled,
   autoEnterEnabled,
+  symmetry = 'off',
+  stabilizer = 0,
+  showReference = true,
+  activeLayerId,
+  viewerMode = false,
+  onHotspotClick,
 }, ref) {
+  void showReference;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number>(0);
   const needsRenderRef = useRef(true);
@@ -91,9 +123,40 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   const sceneStackRef = useRef(sceneStack);
   const pressureEnabledRef = useRef(pressureEnabled);
   const autoEnterEnabledRef = useRef(autoEnterEnabled);
+  const symmetryRef = useRef(symmetry);
+  const stabilizerRef = useRef(stabilizer);
+  const viewerModeRef = useRef(viewerMode);
+  const activeLayerIdRef = useRef(activeLayerId);
+  // Symmetry center in world coords — defaults to viewport center
+  const symmCenterRef = useRef({ x: 0, y: 0 });
+
+  // Path edit state
+  const pathAnchorsRef = useRef<PathAnchor[]>([]);
+  const pathEditNodeIdRef = useRef<string | null>(null);
+  const dragAnchorIdxRef = useRef<number | null>(null);
+  const dragAnchorPartRef = useRef<'anchor' | 'in' | 'out'>('anchor');
+  // dragAnchorIdxRef and dragAnchorPartRef used in pathedit pointer handlers
+  void dragAnchorIdxRef; void dragAnchorPartRef;
+
+  // Portal flash state
+  const isPortalingRef = useRef(false);
+
+  // Auto-exit zoom debounce
+  const lastAutoExitTimeRef = useRef(0);
 
   useEffect(() => { sceneRef.current = scene; needsRenderRef.current = true; }, [scene]);
-  useEffect(() => { viewportRef.current = viewport; needsRenderRef.current = true; }, [viewport]);
+  useEffect(() => {
+    viewportRef.current = viewport;
+    needsRenderRef.current = true;
+    // Update symmetry center to current viewport center
+    const canvas = canvasRef.current;
+    const w = canvas?.width ?? window.innerWidth;
+    const h = canvas?.height ?? window.innerHeight;
+    symmCenterRef.current = {
+      x: (w / 2 - viewport.x) / viewport.scale,
+      y: (h / 2 - viewport.y) / viewport.scale,
+    };
+  }, [viewport]);
   useEffect(() => { toolRef.current = tool; }, [tool]);
   useEffect(() => { strokeColorRef.current = strokeColor; }, [strokeColor]);
   useEffect(() => { strokeWidthRef.current = strokeWidth; }, [strokeWidth]);
@@ -102,6 +165,47 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   useEffect(() => { sceneStackRef.current = sceneStack; }, [sceneStack]);
   useEffect(() => { pressureEnabledRef.current = pressureEnabled; }, [pressureEnabled]);
   useEffect(() => { autoEnterEnabledRef.current = autoEnterEnabled; }, [autoEnterEnabled]);
+  useEffect(() => { symmetryRef.current = symmetry; }, [symmetry]);
+  useEffect(() => { stabilizerRef.current = stabilizer; }, [stabilizer]);
+  useEffect(() => { viewerModeRef.current = viewerMode; }, [viewerMode]);
+  useEffect(() => { activeLayerIdRef.current = activeLayerId; }, [activeLayerId]);
+
+  // When tool switches to pathedit and single path node is selected, parse anchors
+  useEffect(() => {
+    if (tool === 'pathedit') {
+      const ids = Array.from(selectedNodeIds);
+      if (ids.length === 1) {
+        const node = sceneRef.current.nodes.find(n => n.id === ids[0]);
+        if (node?.type === 'path' && node.path) {
+          pathAnchorsRef.current = parsePathToAnchors(node.path.d);
+          pathEditNodeIdRef.current = node.id;
+          needsRenderRef.current = true;
+          return;
+        }
+      }
+      pathAnchorsRef.current = [];
+      pathEditNodeIdRef.current = null;
+    } else if (pathEditNodeIdRef.current) {
+      // Switching away from pathedit — commit any anchor changes
+      const anchors = pathAnchorsRef.current;
+      const nodeId = pathEditNodeIdRef.current;
+      if (anchors.length > 0) {
+        const d = anchorsToPath(anchors);
+        if (d) {
+          const node = sceneRef.current.nodes.find(n => n.id === nodeId);
+          if (node?.path) {
+            const newPath = { ...node.path, d };
+            const newScene = updateNode(sceneRef.current, nodeId, { path: newPath });
+            setScene(newScene);
+            onSceneChange(newScene, viewportRef.current);
+          }
+        }
+      }
+      pathAnchorsRef.current = [];
+      pathEditNodeIdRef.current = null;
+      needsRenderRef.current = true;
+    }
+  }, [tool, selectedNodeIds, setScene, onSceneChange]);
 
   const markDirty = useCallback(() => {
     needsRenderRef.current = true;
@@ -212,9 +316,27 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
 
     onStrokeEnd: useCallback((path: VectorPath, minX: number, minY: number, maxX: number, maxY: number) => {
       const margin = strokeWidthRef.current;
+      const symm = symmetryRef.current;
+      const cx = symmCenterRef.current.x;
+      const cy = symmCenterRef.current.y;
       const node = createNode('path', minX - margin, minY - margin, (maxX - minX) + margin * 2, (maxY - minY) + margin * 2);
       node.path = path;
-      const newScene = addNode(sceneRef.current, node);
+      if (activeLayerIdRef.current) node.layerId = activeLayerIdRef.current;
+      let newScene = addNode(sceneRef.current, node);
+
+      // Symmetry: create mirrored path nodes
+      if (symm !== 'off') {
+        const mirroredDs = mirroredPaths(path.d, symm, cx, cy);
+        for (const d of mirroredDs) {
+          const mirrorPath: VectorPath = { ...path, id: generateId(), d };
+          // Compute bounds of mirrored path (reuse the same bbox approximation)
+          const mNode = createNode('path', minX - margin, minY - margin, (maxX - minX) + margin * 2, (maxY - minY) + margin * 2);
+          mNode.path = mirrorPath;
+          if (activeLayerIdRef.current) mNode.layerId = activeLayerIdRef.current;
+          newScene = addNode(newScene, mNode);
+        }
+      }
+
       setScene(newScene);
       onSceneChange(newScene, viewportRef.current);
       markDirty();
@@ -235,7 +357,35 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
       node.stroke = strokeColorRef.current;
       node.strokeWidth = strokeWidthRef.current;
       node.fill = fillColorRef.current;
-      const newScene = addNode(sceneRef.current, node);
+      if (activeLayerIdRef.current) node.layerId = activeLayerIdRef.current;
+      let newScene = addNode(sceneRef.current, node);
+
+      // Symmetry: reflect shape bounding box
+      const symm = symmetryRef.current;
+      const cx = symmCenterRef.current.x;
+      const cy = symmCenterRef.current.y;
+      if (symm !== 'off') {
+        // Reflect shape center and create mirrored node
+        const shapeCx = x + w / 2;
+        const shapeCy = y + h / 2;
+        const transforms = (symm === 'vertical') ? [{ nx: 2 * cx - shapeCx, ny: shapeCy }]
+          : (symm === 'horizontal') ? [{ nx: shapeCx, ny: 2 * cy - shapeCy }]
+          : (symm === 'both') ? [
+              { nx: 2 * cx - shapeCx, ny: shapeCy },
+              { nx: shapeCx, ny: 2 * cy - shapeCy },
+              { nx: 2 * cx - shapeCx, ny: 2 * cy - shapeCy },
+            ]
+          : [];
+        for (const tr of transforms) {
+          const mNode = createNode(t, tr.nx - w / 2, tr.ny - h / 2, w, h);
+          mNode.stroke = strokeColorRef.current;
+          mNode.strokeWidth = strokeWidthRef.current;
+          mNode.fill = fillColorRef.current;
+          if (activeLayerIdRef.current) mNode.layerId = activeLayerIdRef.current;
+          newScene = addNode(newScene, mNode);
+        }
+      }
+
       setScene(newScene);
       onSceneChange(newScene, viewportRef.current);
       markDirty();
@@ -246,6 +396,46 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
     onSelect: useCallback((worldX: number, worldY: number, additive: boolean) => {
       const node = getNodeAtPoint(sceneRef.current, worldX, worldY);
       if (node) {
+        // Check hotspot (click trigger) — only when viewerMode
+        if (node.hotspot && node.hotspot.trigger === 'click' && onHotspotClick) {
+          const handled = onHotspotClick(node, viewportRef.current);
+          if (handled) { markDirty(); return; }
+        }
+
+        // Check portal navigation
+        if (node.portal?.targetSceneId) {
+          const rootScene = sceneStackRef.current[0]?.scene ?? sceneRef.current;
+          const targetScene = findSceneById(rootScene, node.portal.targetSceneId);
+          if (targetScene) {
+            const containerNode = findNodeHostingScene(rootScene, node.portal.targetSceneId);
+            isPortalingRef.current = true;
+            needsRenderRef.current = true;
+            setTimeout(() => { isPortalingRef.current = false; needsRenderRef.current = true; }, 300);
+            const canvas = canvasRef.current;
+            const w = canvas?.width ?? window.innerWidth;
+            const h = canvas?.height ?? window.innerHeight;
+            const innerVp = node.portal.targetCamera ?? { x: w / 2, y: h / 2, scale: 1 };
+            const currentStack = sceneStackRef.current;
+            const newStack: SceneLevel[] = [
+              ...currentStack.slice(0, -1),
+              { ...currentStack[currentStack.length - 1], viewportWhenLeft: viewportRef.current },
+              {
+                scene: targetScene,
+                parentNodeId: containerNode?.id ?? node.id,
+                label: 'Portal',
+                viewportWhenLeft: innerVp,
+              },
+            ];
+            setSceneStack(newStack);
+            setScene(targetScene);
+            setViewport(innerVp);
+            viewportRef.current = innerVp;
+            setSelectedNodeIds(new Set());
+            markDirty();
+            return;
+          }
+        }
+
         // If part of a group, select all siblings
         const groupId = node.groupId;
         const groupMembers = groupId
@@ -270,7 +460,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
         gesturesApiRef.current?.beginMarquee();
       }
       markDirty();
-    }, [setSelectedNodeIds, markDirty]),
+    }, [setSelectedNodeIds, markDirty, onHotspotClick, setScene, setViewport, setSceneStack]),
 
     onDragMove: useCallback((dx: number, dy: number) => {
       if (draggedNodeIdsRef.current.size === 0) return;
@@ -313,8 +503,13 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
     onDoubleClick: useCallback((worldX: number, worldY: number) => {
       const node = getNodeAtPoint(sceneRef.current, worldX, worldY);
       if (!node) return;
+      // Check hotspot (doubleclick trigger)
+      if (node.hotspot && node.hotspot.trigger === 'doubleclick' && onHotspotClick) {
+        const handled = onHotspotClick(node, viewportRef.current);
+        if (handled) return;
+      }
       performEnterScene(node);
-    }, [performEnterScene]),
+    }, [performEnterScene, onHotspotClick]),
 
     onMarqueeStart: useCallback((wx: number, wy: number) => {
       setMarquee({ x: wx, y: wy, w: 0, h: 0 });
@@ -357,6 +552,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
     () => strokeWidthRef.current,
     gestureCallbacks,
     () => pressureEnabledRef.current,
+    () => stabilizerRef.current,
   );
   gesturesApiRef.current = gestures;
   const { handlers, getLivePoints, getShapeStart, getShapeEnd, getMarqueeStart, getMarqueeEnd, setSpaceDown, cancelStroke } = gestures;
@@ -378,6 +574,10 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
       if (needsRenderRef.current || liveStrokeActive || liveShapeActive || (ms && me)) {
         const ctx = canvas.getContext('2d');
         if (ctx) {
+          const symmMode = symmetryRef.current;
+          const symmCx = symmCenterRef.current.x;
+          const symmCy = symmCenterRef.current.y;
+
           renderScene(ctx, sceneRef.current, viewportRef.current, {
             highlightSelected: selectedNodeIdsRef.current,
             showGrid: true,
@@ -385,12 +585,25 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
               ? { x: Math.min(ms.x, me.x), y: Math.min(ms.y, me.y), width: Math.abs(me.x - ms.x), height: Math.abs(me.y - ms.y) }
               : null,
             enterHintNodeId: enterHintNodeIdRef.current,
+            viewerMode: viewerModeRef.current,
+            symmetryCenter: symmMode !== 'off' ? { x: symmCx, y: symmCy } : null,
+            pathEditNodeId: pathEditNodeIdRef.current,
+            pathEditAnchors: pathAnchorsRef.current.length > 0 ? pathAnchorsRef.current : undefined,
           });
 
-          // Draw live stroke
+          // Draw live stroke (and mirrored previews)
           const pts = getLivePoints();
           if (pts.length > 1) {
             renderLiveStroke(ctx, pts, strokeColorRef.current, strokeWidthRef.current, viewportRef.current, pressureEnabledRef.current);
+            // Mirrored live strokes
+            if (symmMode !== 'off') {
+              const mirPtSets = mirroredPoints(pts, symmMode, symmCx, symmCy);
+              for (const mPts of mirPtSets) {
+                if (mPts.length > 1) {
+                  renderLiveStroke(ctx, mPts, strokeColorRef.current, strokeWidthRef.current, viewportRef.current, pressureEnabledRef.current);
+                }
+              }
+            }
           }
 
           if (liveShapeActive && ss && se) {
@@ -398,6 +611,15 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
               toolRef.current as 'rect' | 'circle',
               strokeColorRef.current, fillColorRef.current, strokeWidthRef.current,
               viewportRef.current);
+          }
+
+          // Portal flash overlay
+          if (isPortalingRef.current) {
+            ctx.save();
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.restore();
           }
         }
         needsRenderRef.current = false;
@@ -488,12 +710,43 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
     }
 
     const zoomingIn = viewport.scale > prevScaleRef.current * 1.0001 || lastWheelDeltaY.current < 0;
+    const zoomingOut = viewport.scale < prevScaleRef.current * 0.9999 || lastWheelDeltaY.current > 0;
     prevScaleRef.current = viewport.scale;
 
     if (autoCandidate && zoomingIn) {
       lastWheelDeltaY.current = 0;
       performEnterScene(autoCandidate);
       return;
+    }
+
+    // Auto-exit: if zoomed out enough that scene occupies < 30% of viewport area
+    const stack = sceneStackRef.current;
+    if (zoomingOut && stack.length > 1) {
+      const now = Date.now();
+      if (now - lastAutoExitTimeRef.current > 1000) {
+        const nodes = sceneRef.current.nodes;
+        if (nodes.length > 0) {
+          const bb = getBoundingBox(nodes);
+          const screenW = bb.width * viewport.scale;
+          const screenH = bb.height * viewport.scale;
+          const sceneScreenArea = screenW * screenH;
+          const viewportArea = w * h;
+          if (sceneScreenArea > 0 && sceneScreenArea < viewportArea * 0.30) {
+            lastAutoExitTimeRef.current = now;
+            const parentEntry = stack[stack.length - 2];
+            const newStack = stack.slice(0, -1);
+            setScene(parentEntry.scene);
+            setViewport(parentEntry.viewportWhenLeft);
+            viewportRef.current = parentEntry.viewportWhenLeft;
+            setSceneStack(newStack);
+            setSelectedNodeIds(new Set());
+            setEnterHintNodeId(null);
+            setAutoEnterToast(null);
+            markDirty();
+            return;
+          }
+        }
+      }
     }
 
     if (hintCandidate) {
@@ -503,7 +756,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
       setEnterHintNodeId(null);
       setAutoEnterToast(null);
     }
-  }, [viewport, performEnterScene]);
+  }, [viewport, performEnterScene, setScene, setViewport, setSceneStack, setSelectedNodeIds, markDirty]);
 
   // Native wheel listener that also tracks wheel direction for auto-enter
   useEffect(() => {
@@ -545,6 +798,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
           }
           const node = createNode('image', dropWorld.x - w / 2, dropWorld.y - h / 2, w, h);
           node.imageData = dataUrl;
+          if (activeLayerIdRef.current) node.layerId = activeLayerIdRef.current;
           const newScene = addNode(sceneRef.current, node);
           setScene(newScene);
           onSceneChange(newScene, viewportRef.current);
@@ -660,6 +914,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
       node.fontSize = fontSize;
       node.fontFamily = 'system-ui, sans-serif';
       node.color = strokeColorRef.current;
+      if (activeLayerIdRef.current) node.layerId = activeLayerIdRef.current;
       const newScene = addNode(sceneRef.current, node);
       setScene(newScene);
       onSceneChange(newScene, viewportRef.current);

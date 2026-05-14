@@ -43,6 +43,7 @@ export default function App() {
   const [pressureEnabled, setPressureEnabled] = useState(true);
   const [autoEnterEnabled, setAutoEnterEnabled] = useState(true);
   const [showSavedFlash, setShowSavedFlash] = useState(false);
+  const [autoSaveFailed, setAutoSaveFailed] = useState(false);
   const [assets, setAssets] = useState<Asset[]>(_init.assets);
   const [showLibrary, setShowLibrary] = useState(false);
   const [showLayers, setShowLayers] = useState(false);
@@ -141,8 +142,13 @@ export default function App() {
         savedAt: Date.now(),
         assets: assetsRef.current,
       };
-      saveToLocalStorage(state);
-      triggerSavedFlash();
+      const saved = saveToLocalStorage(state);
+      if (saved) {
+        setAutoSaveFailed(false);
+        triggerSavedFlash();
+      } else {
+        setAutoSaveFailed(true);
+      }
       autoSaveTimerRef.current = null;
     }, 500);
   }, [getRootScene, triggerSavedFlash]);
@@ -670,7 +676,8 @@ export default function App() {
           ))}
         </div>
 
-        {showSavedFlash && <span className="text-[10px] text-accent">Saved</span>}
+        {autoSaveFailed && <span className="text-[10px] text-red-400">Auto-save failed: canvas too large. Use File &gt; Save to export.</span>}
+        {showSavedFlash && !autoSaveFailed && <span className="text-[10px] text-accent">Saved</span>}
 
         {/* Start camera */}
         <button onClick={handleSetStartCamera} title="Set as start point for export" className="px-2 py-1 rounded text-xs text-gray-400 hover:text-white hover:bg-white/10 transition-colors flex-shrink-0">

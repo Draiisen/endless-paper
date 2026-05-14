@@ -40,6 +40,7 @@ export function useGestures(
   getStrokeWidth: () => number,
   callbacks: GestureCallbacks,
   getPressureSensitive: () => boolean = () => false,
+  getStabilizer: () => number = () => 0,
 ) {
   // Always read latest callbacks via ref so handler identities don't churn.
   const callbacksRef = useRef(callbacks);
@@ -53,6 +54,9 @@ export function useGestures(
   const lastPointer = useRef<Point>({ x: 0, y: 0 });
   const rawPoints = useRef<Point[]>([]);
   const livePointsRef = useRef<Point[]>([]);
+  // Lazy brush position for stabilizer (wired in future pass)
+  const brushPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  void getStabilizer; void brushPosRef;
   const shapeStartRef = useRef<Point | null>(null);
   const shapeEndRef = useRef<Point | null>(null);
   const marqueeStartRef = useRef<Point | null>(null);
@@ -331,6 +335,8 @@ export function useGestures(
     if (tool === 'pen') {
       isDrawing.current = true;
       const p = e.pointerType === 'mouse' ? 0.5 : (e.pressure || 0.5);
+      // Initialize brush position exactly at first touch point (no lag at start)
+      brushPosRef.current = { x: world.x, y: world.y };
       const pt: Point = { x: world.x, y: world.y, p };
       rawPoints.current = [pt];
       livePointsRef.current = [pt];
@@ -437,9 +443,16 @@ export function useGestures(
     if (isDrawing.current) {
       if (tool === 'pen') {
         const p = e.pointerType === 'mouse' ? 0.5 : (e.pressure || 0.5);
-        rawPoints.current.push({ x: world.x, y: world.y, p });
+        // Apply lazy brush stabilizer
+        const stabRaw = getStabilizer();
+        const stab = Math.max(0, Math.min(95, stabRaw));
+        const factor = Math.max(0.05, 1 - stab / 100);
+        const bp = brushPosRef.current;
+        bp.x += (world.x - bp.x) * factor;
+        bp.y += (world.y - bp.y) * factor;
+        rawPoints.current.push({ x: bp.x, y: bp.y, p });
         livePointsRef.current = rawPoints.current.slice();
-        callbacksRef.current.onStrokeMove?.(world.x, world.y);
+        callbacksRef.current.onStrokeMove?.(bp.x, bp.y);
       } else if (tool === 'rect' || tool === 'circle') {
         shapeEndRef.current = { x: world.x, y: world.y };
         callbacksRef.current.onShapeMove?.(world.x, world.y);
