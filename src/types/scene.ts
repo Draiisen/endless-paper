@@ -174,8 +174,12 @@ export interface ColorLayer {
 }
 
 export interface ImageLOD {
-  thumbnail?: string;          // 64px JPEG for tiny zoom-out preview
-  colorLayers?: ColorLayer[];  // multi-color vector, world-space
+  thumbnail?: string;           // 64px JPEG for tiny zoom-out preview
+  colorLayers?: ColorLayer[];   // multi-color vector paths in SOURCE-PIXEL space
+  sourceW: number;              // pixel width used for tracing  (for rendering transform)
+  sourceH: number;              // pixel height used for tracing
+  naturalW?: number;            // original image natural width   (for LOD threshold)
+  naturalH?: number;            // original image natural height
 }
 
 export interface BrushStamp {

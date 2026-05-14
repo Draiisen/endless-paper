@@ -1,24 +1,34 @@
-import { SceneNode, ColorLayer, VectorPath } from '../types/scene';
+import { SceneNode, ColorLayer, ImageLOD, VectorPath } from '../types/scene';
 import { generateId } from './scene-graph';
-import { transformPathCoords } from './svg-path';
 
 // ── Thumbnail ─────────────────────────────────────────────────────────────────
 
-/**
- * Generates a 64×64 JPEG thumbnail from an already-loaded HTMLImageElement.
- * Called synchronously on the main thread right after import.
- */
+/** 64×64 JPEG, synchronous, called right after image load. */
 export function generateThumbnail(img: HTMLImageElement): string {
   const SIZE = 64;
-  const canvas = document.createElement('canvas');
-  canvas.width = SIZE;
-  canvas.height = SIZE;
-  const ctx = canvas.getContext('2d')!;
-  ctx.drawImage(img, 0, 0, SIZE, SIZE);
-  return canvas.toDataURL('image/jpeg', 0.65);
+  const c = document.createElement('canvas');
+  c.width = SIZE; c.height = SIZE;
+  c.getContext('2d')!.drawImage(img, 0, 0, SIZE, SIZE);
+  return c.toDataURL('image/jpeg', 0.65);
 }
 
-// ── Color vectorization ───────────────────────────────────────────────────────
+// ── Pixel extraction ──────────────────────────────────────────────────────────
+
+/** Downscale to at most MAX_DIM before sending to the worker. */
+const MAX_DIM = 480;
+
+function extractPixels(img: HTMLImageElement): { buffer: ArrayBuffer; w: number; h: number } {
+  const aspect = img.naturalWidth / Math.max(1, img.naturalHeight);
+  const w = Math.round(Math.min(img.naturalWidth, MAX_DIM));
+  const h = Math.round(w / aspect);
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  c.getContext('2d')!.drawImage(img, 0, 0, w, h);
+  const id = c.getContext('2d')!.getImageData(0, 0, w, h);
+  return { buffer: id.data.buffer.slice(0), w, h };
+}
+
+// ── Worker communication ──────────────────────────────────────────────────────
 
 interface WorkerOutput {
   nodeId: string;
@@ -28,37 +38,19 @@ interface WorkerOutput {
 }
 
 /**
- * Downsample the image to at most MAX_DIM in either dimension before sending
- * to the worker.  Keeps memory + CPU proportional to image content, not file size.
- */
-const MAX_DIM = 480;
-
-function extractPixels(img: HTMLImageElement): { buffer: ArrayBuffer; w: number; h: number } {
-  const aspect = img.naturalWidth / Math.max(1, img.naturalHeight);
-  const w = Math.round(Math.min(img.naturalWidth, MAX_DIM));
-  const h = Math.round(w / aspect);
-
-  const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext('2d')!;
-  ctx.drawImage(img, 0, 0, w, h);
-
-  const id = ctx.getImageData(0, 0, w, h);
-  // Transfer the underlying buffer — zero-copy pass to worker
-  return { buffer: id.data.buffer.slice(0), w, h };
-}
-
-/**
- * Launch a background Web Worker to color-vectorize an image node.
- * On completion, calls `onComplete` with the world-space ColorLayers.
+ * Launch a Web Worker to color-vectorize an image node.
+ *
+ * Paths are returned in SOURCE-PIXEL coordinates [0, sourceW] × [0, sourceH].
+ * The renderer applies ctx.transform(scaleX, 0, 0, scaleY, node.x, node.y) at
+ * draw time, so move / resize just works without touching the stored paths.
+ *
  * Returns a cancel function that terminates the worker early.
  */
 export function requestColorVectorization(
   node: SceneNode,
   img: HTMLImageElement,
   numColors: number,
-  onComplete: (nodeId: string, colorLayers: ColorLayer[]) => void,
+  onComplete: (nodeId: string, lod: Pick<ImageLOD, 'colorLayers' | 'sourceW' | 'sourceH'>) => void,
 ): () => void {
   const { buffer, w, h } = extractPixels(img);
 
@@ -71,17 +63,13 @@ export function requestColorVectorization(
     worker.terminate();
     const { nodeId, layers, sourceW, sourceH } = e.data;
 
-    const scaleX = node.width / Math.max(1, sourceW);
-    const scaleY = node.height / Math.max(1, sourceH);
-
+    // Build ColorLayers keeping paths in source-pixel space.
+    // The renderer will apply a canvas transform to map them to world coords.
     const colorLayers: ColorLayer[] = layers.map(layer => {
       const color = `rgb(${layer.r},${layer.g},${layer.b})`;
-      const paths: VectorPath[] = layer.paths.map(rawD => ({
+      const paths: VectorPath[] = layer.paths.map(d => ({
         id: generateId(),
-        d: transformPathCoords(rawD, (px, py) => ({
-          x: node.x + px * scaleX,
-          y: node.y + py * scaleY,
-        })),
+        d,               // ← source-pixel coords, NOT world-space
         fill: color,
         stroke: 'none',
         strokeWidth: 0,
@@ -90,7 +78,7 @@ export function requestColorVectorization(
       return { color, paths };
     });
 
-    onComplete(nodeId, colorLayers);
+    onComplete(nodeId, { colorLayers, sourceW, sourceH });
   };
 
   worker.onerror = () => worker.terminate();

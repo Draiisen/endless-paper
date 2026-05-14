@@ -554,25 +554,17 @@ function drawVectorPath(ctx: CanvasRenderingContext2D, vp: VectorPath): void {
 export const imageCache = new LRUImageCache(50);
 
 /**
- * LOD thresholds (in screen pixels, i.e. node.width * viewportScale):
- *   < 70px  → thumbnail (fast, low detail)
- *   70-350px → raster original  (faithful)
- *   > 350px  → color vectors if available (crisp at any zoom)
- * Legacy monochrome vectorPaths are used as a fallback when colorLayers not yet ready.
+ * LOD selection (smart, based on native pixel density):
+ *   screenW < 70px          → thumbnail (fast)
+ *   zoomed past native res  → color vector layers (crisp at any zoom)
+ *   otherwise               → raster original (faithful)
+ *
+ * "Zoomed past native" = (naturalW / node.width) * viewportScale > 1.2,
+ * i.e. each screen pixel maps to less than 1 original pixel.
+ * Color layers are stored in source-pixel space and mapped via ctx.transform.
  */
 function drawImageLOD(ctx: CanvasRenderingContext2D, node: SceneNode, viewportScale: number): void {
   const screenW = node.width * viewportScale;
-
-  // ── High zoom: colour vectors ────────────────────────────────────────────
-  if (screenW > 350 && node.lod?.colorLayers && node.lod.colorLayers.length > 0) {
-    for (const layer of node.lod.colorLayers) {
-      ctx.fillStyle = layer.color;
-      for (const vp of layer.paths) {
-        ctx.fill(getPath2D(vp.d));
-      }
-    }
-    return;
-  }
 
   // ── Low zoom: thumbnail ───────────────────────────────────────────────────
   if (screenW < 70 && node.lod?.thumbnail) {
@@ -581,6 +573,31 @@ function drawImageLOD(ctx: CanvasRenderingContext2D, node: SceneNode, viewportSc
       ctx.drawImage(img, node.x, node.y, node.width, node.height);
       return;
     }
+  }
+
+  // ── High zoom: colour vectors (source-pixel space → world via transform) ─
+  const lod = node.lod;
+  const nw = lod?.naturalW ?? 0;
+  const useVectors = lod?.colorLayers && lod.colorLayers.length > 0 &&
+    lod.sourceW > 0 && lod.sourceH > 0 && nw > 0 &&
+    (nw / node.width) * viewportScale > 1.2;
+
+  if (useVectors && lod) {
+    ctx.save();
+    // Map source-pixel coords [0,sourceW]×[0,sourceH] → world rect [node.x,node.y,node.width,node.height]
+    ctx.transform(
+      node.width / lod.sourceW, 0,
+      0, node.height / lod.sourceH,
+      node.x, node.y,
+    );
+    for (const layer of lod.colorLayers!) {
+      ctx.fillStyle = layer.color;
+      for (const vp of layer.paths) {
+        ctx.fill(getPath2D(vp.d));
+      }
+    }
+    ctx.restore();
+    return;
   }
 
   // ── Legacy monochrome vectorization (manual "Vectorize" button) ───────────

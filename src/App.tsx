@@ -59,6 +59,7 @@ export default function App({ initialState, settings }: AppProps) {
   const [tourPlaying, setTourPlaying] = useState(false);
   const [showSaves, setShowSaves] = useState(false);
   const [projectSizeMB, setProjectSizeMB] = useState(0);
+  const [lodProcessingCount, setLodProcessingCount] = useState(0);
 
   const { popup, handleNodeClick, dismiss: dismissPopup } = useHotspotHandler(viewerMode);
 
@@ -511,20 +512,28 @@ export default function App({ initialState, settings }: AppProps) {
         node.imageData = dataUrl;
         node.layerId = activeLayerId || undefined;
         // Thumbnail: fast, synchronous, ready immediately
-        node.lod = { thumbnail: generateThumbnail(img) };
+        node.lod = {
+          thumbnail: generateThumbnail(img),
+          sourceW: 0,
+          sourceH: 0,
+          naturalW: img.naturalWidth,
+          naturalH: img.naturalHeight,
+        };
 
         const newScene = addNode(sceneRef.current, node);
         setScene(newScene);
         handleSceneChange(newScene, viewport);
 
         // Color-vector LOD: runs in a Web Worker, updates scene when done
-        requestColorVectorization(node, img, 8, (nodeId, colorLayers) => {
+        setLodProcessingCount(c => c + 1);
+        requestColorVectorization(node, img, 8, (nodeId, lod) => {
+          setLodProcessingCount(c => c - 1);
           const cur = sceneRef.current;
           const updated = {
             ...cur,
             nodes: cur.nodes.map(n =>
               n.id === nodeId
-                ? { ...n, lod: { ...(n.lod ?? {}), colorLayers } }
+                ? { ...n, lod: { ...(n.lod ?? {}), colorLayers: lod.colorLayers, sourceW: lod.sourceW, sourceH: lod.sourceH } }
                 : n,
             ),
           };
@@ -727,6 +736,7 @@ export default function App({ initialState, settings }: AppProps) {
           ))}
         </div>
 
+        {lodProcessingCount > 0 && <span className="text-[10px] text-gray-400 flex-shrink-0 animate-pulse">⚙ Vectorizing…</span>}
         {projectSizeMB > 15 && <span className="text-[10px] text-orange-400 flex-shrink-0" title="Project is large — export a backup">⚠ {projectSizeMB.toFixed(0)} MB</span>}
         {projectSizeMB > 5 && projectSizeMB <= 15 && <span className="text-[10px] text-yellow-400/80 flex-shrink-0">{projectSizeMB.toFixed(1)} MB</span>}
         {autoSaveFailed && <span className="text-[10px] text-red-400">Auto-save failed: canvas too large. Use File &gt; Save to export.</span>}
