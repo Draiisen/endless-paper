@@ -1,4 +1,4 @@
-export type ToolType = 'pen' | 'select' | 'hand' | 'eraser' | 'image' | 'rect' | 'circle';
+export type ToolType = 'pen' | 'select' | 'hand' | 'eraser' | 'image' | 'rect' | 'circle' | 'text';
 
 export interface Viewport {
   x: number;   // translation x in pixels
@@ -13,11 +13,12 @@ export interface VectorPath {
   strokeWidth: number;
   fill: string;
   opacity: number;
+  pressureSensitive?: boolean;
 }
 
 export interface SceneNode {
   id: string;
-  type: 'path' | 'image' | 'rect' | 'circle' | 'group';
+  type: 'path' | 'image' | 'rect' | 'circle' | 'group' | 'text';
 
   // Bounding box in this scene's coordinate space
   x: number;
@@ -40,6 +41,15 @@ export interface SceneNode {
   vectorPaths?: VectorPath[];
   isVectorized?: boolean;
 
+  // For text nodes
+  text?: string;
+  fontSize?: number;
+  fontFamily?: string;
+  color?: string;
+
+  // Optional shared group identity for multi-select grouping
+  groupId?: string;
+
   // Inner scene — content visible when you "enter" this node
   innerScene?: Scene;
 }
@@ -60,4 +70,11 @@ export interface SceneLevel {
   parentNodeId: string;   // which node we entered
   label: string;          // display name for breadcrumb
   viewportWhenLeft: Viewport;  // restore when going back
+}
+
+export interface PersistedState {
+  version: 1;
+  rootScene: Scene;
+  viewport: Viewport;
+  savedAt: number;
 }

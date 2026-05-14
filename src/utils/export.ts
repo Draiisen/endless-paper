@@ -83,6 +83,18 @@ export function exportToHTML(rootScene: Scene, _sceneStack: SceneLevel[]): strin
         if (node.fill && node.fill !== 'none') { ctx.fillStyle = node.fill; ctx.fill(); }
         if (node.stroke && node.stroke !== 'none') { ctx.strokeStyle = node.stroke; ctx.lineWidth = node.strokeWidth || 2; ctx.stroke(); }
         break;
+      case 'text':
+        if (node.text) {
+          var fs = node.fontSize || 16;
+          ctx.font = fs + 'px ' + (node.fontFamily || 'system-ui, sans-serif');
+          ctx.textBaseline = 'top';
+          ctx.fillStyle = node.color || '#1a1a2e';
+          var lines = node.text.split('\\n');
+          for (var i = 0; i < lines.length; i++) {
+            ctx.fillText(lines[i], node.x, node.y + i * fs * 1.2);
+          }
+        }
+        break;
     }
 
     if (node.innerScene && node.innerScene.nodes.length > 0) {
@@ -411,6 +423,18 @@ export function exportToSVG(scene: Scene, width = 800, height = 600): string {
       }
     } else if (node.type === 'image' && node.imageData) {
       svgContent += `<image x="${node.x}" y="${node.y}" width="${node.width}" height="${node.height}" href="${node.imageData}"/>`;
+    } else if (node.type === 'text' && node.text) {
+      const fontSize = node.fontSize ?? 16;
+      const fontFamily = node.fontFamily ?? 'system-ui, sans-serif';
+      const color = node.color ?? '#1a1a2e';
+      const lines = node.text.split('\n');
+      const lh = fontSize * 1.2;
+      svgContent += `<text x="${node.x}" y="${node.y + fontSize}" font-size="${fontSize}" font-family="${fontFamily.replace(/"/g, '&quot;')}" fill="${color}">`;
+      for (let i = 0; i < lines.length; i++) {
+        const xml = lines[i].replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        svgContent += `<tspan x="${node.x}" dy="${i === 0 ? 0 : lh}">${xml}</tspan>`;
+      }
+      svgContent += `</text>`;
     }
   }
 
@@ -429,6 +453,7 @@ export function getNodeLabel(node: SceneNode): string {
     case 'rect': return 'Rectangle';
     case 'circle': return 'Circle';
     case 'group': return 'Group';
+    case 'text': return 'Text';
     default: return 'Object';
   }
 }

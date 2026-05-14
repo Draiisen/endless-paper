@@ -1,5 +1,6 @@
 import React, { useRef } from 'react';
 import { ToolType } from '../types/scene';
+import { ColorPicker } from './ColorPicker';
 
 interface ToolbarProps {
   tool: ToolType;
@@ -14,6 +15,15 @@ interface ToolbarProps {
   onImageImport: (file: File) => void;
   onVectorize: () => void;
   canVectorize: boolean;
+  pressureEnabled: boolean;
+  setPressureEnabled: (b: boolean) => void;
+  autoEnterEnabled: boolean;
+  setAutoEnterEnabled: (b: boolean) => void;
+  hasMultiSelection: boolean;
+  hasSelection: boolean;
+  selectedAreInGroup: boolean;
+  onGroup: () => void;
+  onUngroup: () => void;
 }
 
 interface ToolButtonProps {
@@ -47,6 +57,10 @@ export function Toolbar({
   onImageImport,
   onVectorize,
   canVectorize,
+  pressureEnabled, setPressureEnabled,
+  autoEnterEnabled, setAutoEnterEnabled,
+  hasMultiSelection, hasSelection, selectedAreInGroup,
+  onGroup, onUngroup,
 }: ToolbarProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -63,15 +77,15 @@ export function Toolbar({
   };
 
   return (
-    <div className="fixed left-0 top-0 bottom-0 w-14 bg-ink flex flex-col items-center py-3 gap-1 z-20 shadow-xl select-none">
+    <div className="fixed left-0 top-0 bottom-0 w-14 bg-ink flex flex-col items-center py-3 gap-1 z-20 shadow-xl select-none overflow-y-auto">
       {/* Logo */}
-      <div className="w-10 h-10 flex items-center justify-center mb-2">
+      <div className="w-10 h-10 flex items-center justify-center mb-2 flex-shrink-0">
         <svg viewBox="0 0 24 24" className="w-7 h-7 fill-accent">
           <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
         </svg>
       </div>
 
-      <div className="w-10 h-px bg-white/10 mb-1" />
+      <div className="w-10 h-px bg-white/10 mb-1 flex-shrink-0" />
 
       {/* Tools */}
       <ToolButton active={tool === 'hand'} onClick={() => setTool('hand')} title="Hand (H)">
@@ -104,6 +118,12 @@ export function Toolbar({
         </svg>
       </ToolButton>
 
+      <ToolButton active={tool === 'text'} onClick={() => setTool('text')} title="Text (T)">
+        <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current">
+          <path d="M5 4v3h5.5v12h3V7H19V4z"/>
+        </svg>
+      </ToolButton>
+
       <ToolButton active={tool === 'eraser'} onClick={() => setTool('eraser')} title="Eraser (E)">
         <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current">
           <path d="M15.14 3c-.51 0-1.02.2-1.41.59L2.59 14.73c-.78.77-.78 2.04 0 2.83L5.17 20H20v-2H9.84l-4-4L17 2.94l4 4V8h2V6.59c0-.51-.2-1.02-.59-1.41l-3.86-3.77C14.16 3.2 13.65 3 13.14 3h2z"/>
@@ -125,6 +145,22 @@ export function Toolbar({
         </ToolButton>
       )}
 
+      {hasMultiSelection && !selectedAreInGroup && (
+        <ToolButton active={false} onClick={onGroup} title="Group selection (Ctrl+G)">
+          <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current">
+            <path d="M3 5h7v2H5v5H3V5zm18 0v7h-2V7h-5V5h7zM3 19v-7h2v5h5v2H3zm18 0h-7v-2h5v-5h2v7z"/>
+          </svg>
+        </ToolButton>
+      )}
+
+      {hasSelection && selectedAreInGroup && (
+        <ToolButton active={false} onClick={onUngroup} title="Ungroup (Ctrl+Shift+G)">
+          <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current">
+            <path d="M5 5h4v2H7v2H5V5zm14 0v4h-2V7h-2V5h4zM5 19v-4h2v2h2v2H5zm14 0h-4v-2h2v-2h2v4zM11 9h2v6h-2z"/>
+          </svg>
+        </ToolButton>
+      )}
+
       <input
         ref={fileInputRef}
         type="file"
@@ -133,56 +169,50 @@ export function Toolbar({
         onChange={handleFileChange}
       />
 
-      <div className="flex-1" />
+      <div className="flex-1 min-h-[8px]" />
+
+      {/* Pressure toggle */}
+      <button
+        className={`w-10 h-7 mb-1 rounded text-[10px] font-semibold transition-colors flex-shrink-0 ${
+          pressureEnabled ? 'bg-accent text-white' : 'text-gray-500 hover:text-white border border-white/10'
+        }`}
+        onClick={() => setPressureEnabled(!pressureEnabled)}
+        title="Pen pressure sensitivity"
+      >
+        PSI
+      </button>
+
+      {/* Auto-enter toggle */}
+      <button
+        className={`w-10 h-7 mb-1 rounded text-[10px] font-semibold transition-colors flex-shrink-0 ${
+          autoEnterEnabled ? 'bg-accent text-white' : 'text-gray-500 hover:text-white border border-white/10'
+        }`}
+        onClick={() => setAutoEnterEnabled(!autoEnterEnabled)}
+        title="Auto-enter scene on deep zoom"
+      >
+        ZOOM
+      </button>
 
       {/* Color pickers */}
-      <div className="w-10 flex flex-col items-center gap-2 mb-2">
-        <div className="relative w-8 h-8" title="Stroke color">
-          <div
-            className="w-8 h-8 rounded-full border-2 border-white/30 cursor-pointer shadow-md"
-            style={{ backgroundColor: strokeColor }}
-            onClick={() => document.getElementById('stroke-color-input')?.click()}
-          />
-          <input
-            id="stroke-color-input"
-            type="color"
-            value={strokeColor}
-            onChange={(e) => setStrokeColor(e.target.value)}
-            className="absolute inset-0 opacity-0 w-full h-full cursor-pointer"
-          />
-        </div>
-        <div className="relative w-6 h-6" title="Fill color">
-          <div
-            className="w-6 h-6 rounded border-2 border-white/30 cursor-pointer shadow"
-            style={{
-              backgroundColor: fillColor === 'none' ? 'transparent' : fillColor,
-              backgroundImage: fillColor === 'none'
-                ? 'linear-gradient(45deg, #ccc 25%, transparent 25%), linear-gradient(-45deg, #ccc 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #ccc 75%), linear-gradient(-45deg, transparent 75%, #ccc 75%)'
-                : 'none',
-              backgroundSize: '8px 8px',
-              backgroundPosition: '0 0, 0 4px, 4px -4px, -4px 0px',
-            }}
-            onClick={() => document.getElementById('fill-color-input')?.click()}
-          />
-          <input
-            id="fill-color-input"
-            type="color"
-            value={fillColor === 'none' ? '#ffffff' : fillColor}
-            onChange={(e) => setFillColor(e.target.value)}
-            className="absolute inset-0 opacity-0 w-full h-full cursor-pointer"
-          />
-        </div>
-        <button
-          className="text-xs text-gray-500 hover:text-white transition-colors"
-          onClick={() => setFillColor(fillColor === 'none' ? '#ffffff' : 'none')}
-          title="Toggle fill"
-        >
-          {fillColor === 'none' ? '○' : '●'}
-        </button>
+      <div className="w-10 flex flex-col items-center gap-2 mb-2 flex-shrink-0">
+        <ColorPicker
+          value={strokeColor}
+          onChange={setStrokeColor}
+          title="Stroke color"
+          swatchClassName="w-8 h-8 rounded-full border-2 border-white/30 cursor-pointer shadow-md"
+        />
+        <ColorPicker
+          value={fillColor}
+          onChange={setFillColor}
+          title="Fill color"
+          swatchClassName="w-6 h-6 rounded border-2 border-white/30 cursor-pointer shadow"
+          showFillToggle
+          onClearFill={() => setFillColor(fillColor === 'none' ? '#ffffff' : 'none')}
+        />
       </div>
 
       {/* Stroke width */}
-      <div className="w-10 flex flex-col items-center gap-1 mb-2" title="Stroke width">
+      <div className="w-10 flex flex-col items-center gap-1 mb-2 flex-shrink-0" title="Stroke width">
         <div
           className="w-6 rounded-full bg-white/60"
           style={{ height: `${Math.max(2, Math.min(12, strokeWidth))}px` }}

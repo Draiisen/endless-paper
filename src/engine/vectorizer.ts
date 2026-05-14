@@ -7,10 +7,16 @@ export interface VectorizerOptions {
   color?: string;       // output color, default '#1a1a2e'
 }
 
+export interface VectorizeResult {
+  paths: VectorPath[];
+  tracedWidth: number;
+  tracedHeight: number;
+}
+
 export async function vectorizeImage(
   imageData: string,
   options: VectorizerOptions = {}
-): Promise<VectorPath[]> {
+): Promise<VectorizeResult> {
   const { threshold = 128, simplify = 2, color = '#1a1a2e' } = options;
 
   return new Promise((resolve, reject) => {
@@ -36,7 +42,7 @@ export async function vectorizeImage(
 
         const imagePixels = ctx.getImageData(0, 0, w, h);
         const paths = tracePaths(imagePixels, threshold, simplify, color);
-        resolve(paths);
+        resolve({ paths, tracedWidth: w, tracedHeight: h });
       } catch (e) {
         reject(e);
       }
