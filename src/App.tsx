@@ -9,9 +9,10 @@ import { LayersPanel } from './components/LayersPanel';
 import { MiniMap } from './components/MiniMap';
 import { PropertiesPanel } from './components/PropertiesPanel';
 import { PopupDisplay, useHotspotHandler } from './components/PopupRenderer';
+import { SavesModal } from './components/SavesModal';
 import { useHistory } from './hooks/useHistory';
 import { exportToFile, importFromFile, clearLocalStorage, saveSettings, AppSettings } from './engine/persistence';
-import { saveToIDB } from './engine/idb-store';
+import { saveToIDB, clearIDB } from './engine/idb-store';
 import { audioManager } from './engine/audio-manager';
 
 function makeInitialViewport(): Viewport {
@@ -55,6 +56,7 @@ export default function App({ initialState, settings }: AppProps) {
   const [audioMuted, setAudioMuted] = useState(settings.audioMuted ?? false);
   const [viewerMode, setViewerMode] = useState(false);
   const [tourPlaying, setTourPlaying] = useState(false);
+  const [showSaves, setShowSaves] = useState(false);
 
   const { popup, handleNodeClick, dismiss: dismissPopup } = useHotspotHandler(viewerMode);
 
@@ -330,11 +332,13 @@ export default function App({ initialState, settings }: AppProps) {
     };
     const newAssets = [...assetsRef.current, asset];
     setAssets(newAssets);
-  }, [selectedNodeIds]);
+    scheduleAutoSave();
+  }, [selectedNodeIds, scheduleAutoSave]);
 
   const handleDeleteAsset = useCallback((id: string) => {
     setAssets(prev => prev.filter(a => a.id !== id));
-  }, []);
+    scheduleAutoSave();
+  }, [scheduleAutoSave]);
 
   const handlePlaceAsset = useCallback((asset: Asset) => {
     const cx = (window.innerWidth / 2 - viewportRef.current.x) / viewportRef.current.scale;
@@ -461,6 +465,18 @@ export default function App({ initialState, settings }: AppProps) {
     } catch { /* cancelled */ }
   }, [setScene, setSceneStack, history, scheduleAutoSave]);
 
+  const handleRestoreFromSave = useCallback((state: PersistedState) => {
+    const newScene = state.rootScene;
+    const newVp = state.viewport ?? makeInitialViewport();
+    setScene(newScene);
+    setViewport(newVp);
+    setSceneStack(createInitialSceneStack(newScene, newVp));
+    setSelectedNodeIds(new Set());
+    setAssets(state.assets ?? []);
+    history.push(newScene, newVp);
+    scheduleAutoSave();
+  }, [setScene, setSceneStack, history, scheduleAutoSave]);
+
   const handleNew = useCallback(() => {
     if (!confirm('Start a new canvas? Unsaved changes will be lost.')) return;
     const newScene = createScene();
@@ -472,6 +488,7 @@ export default function App({ initialState, settings }: AppProps) {
     setAssets([]);
     history.push(newScene, newVp);
     clearLocalStorage();
+    void clearIDB();
   }, [setScene, setSceneStack, history]);
 
   const handleImageImport = useCallback((file: File) => {
@@ -734,6 +751,7 @@ export default function App({ initialState, settings }: AppProps) {
         <button onClick={handleNew} className="px-2 py-1 rounded text-xs text-gray-300 hover:text-white hover:bg-white/10 transition-colors">New</button>
         <button onClick={handleManualSave} title="Ctrl+S" className="px-2 py-1 rounded text-xs text-gray-300 hover:text-white hover:bg-white/10 transition-colors">Save</button>
         <button onClick={handleLoad} className="px-2 py-1 rounded text-xs text-gray-300 hover:text-white hover:bg-white/10 transition-colors">Load</button>
+        <button onClick={() => setShowSaves(true)} title="Save management" className="px-2 py-1 rounded text-xs text-gray-300 hover:text-white hover:bg-white/10 transition-colors">Saves</button>
         <button onClick={() => setShowExport(true)} title="Ctrl+E" className="ml-1 px-3 py-1.5 rounded-lg bg-accent text-white text-xs font-semibold hover:bg-accent/80 transition-colors">Export</button>
       </div>
 
@@ -797,6 +815,14 @@ export default function App({ initialState, settings }: AppProps) {
           state={{ version: 1, rootScene: rootSceneRef.current, viewport: viewportRef.current, savedAt: Date.now(), assets: assetsRef.current }}
           sceneStack={sceneStack}
           onClose={() => setShowExport(false)}
+        />
+      )}
+
+      {showSaves && (
+        <SavesModal
+          currentState={{ version: 1, rootScene: rootSceneRef.current, viewport: viewportRef.current, savedAt: Date.now(), assets: assetsRef.current }}
+          onClose={() => setShowSaves(false)}
+          onRestore={handleRestoreFromSave}
         />
       )}
     </div>

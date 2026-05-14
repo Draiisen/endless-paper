@@ -98,9 +98,11 @@ export function exportToHTML(rootScene: Scene, _sceneStack: SceneLevel[]): strin
     ctx.globalAlpha = 1;
   }
 
-  function drawNode(node) {
-    if (node.isReference) return; // tracing overlays hidden in viewer
+  function drawNode(node, layerAlpha) {
+    if (node.isReference) return;
+    var nodeAlpha = (node.layerId && layerAlpha && layerAlpha[node.layerId] !== undefined) ? layerAlpha[node.layerId] : 1;
     ctx.save();
+    if (nodeAlpha !== 1) ctx.globalAlpha = nodeAlpha;
     switch (node.type) {
       case 'path':
         if (node.path) drawVectorPath(node.path);
@@ -186,7 +188,14 @@ export function exportToHTML(rootScene: Scene, _sceneStack: SceneLevel[]): strin
     for (var x = sx; x <= wr; x += gs) { ctx.beginPath(); ctx.moveTo(x, wt); ctx.lineTo(x, wb); ctx.stroke(); }
     for (var y = sy; y <= wb; y += gs) { ctx.beginPath(); ctx.moveTo(wl, y); ctx.lineTo(wr, y); ctx.stroke(); }
 
-    visibleNodes(scene).forEach(drawNode);
+    var layerAlpha = {};
+    if (scene.layers) {
+      for (var li = 0; li < scene.layers.length; li++) {
+        var ld = scene.layers[li];
+        layerAlpha[ld.id] = ld.opacity !== undefined ? ld.opacity : 1;
+      }
+    }
+    visibleNodes(scene).forEach(function(n) { drawNode(n, layerAlpha); });
     ctx.restore();
 
     updateBreadcrumb();
@@ -434,6 +443,22 @@ export function exportToHTML(rootScene: Scene, _sceneStack: SceneLevel[]): strin
   // Camera tour
   var tourIndex = 0;
   var tourRunning = false;
+
+  function navigateToScenePath(path) {
+    sceneStack = [{ scene: sceneData, label: 'World', parentNodeId: null, viewportWhenLeft: { x: 0, y: 0, scale: 1 } }];
+    var cur = sceneData;
+    for (var pi = 0; pi < path.length; pi++) {
+      var nid = path[pi];
+      var pn = null;
+      for (var ni = 0; ni < cur.nodes.length; ni++) {
+        if (cur.nodes[ni].id === nid) { pn = cur.nodes[ni]; break; }
+      }
+      if (!pn || !pn.innerScene) break;
+      sceneStack.push({ scene: pn.innerScene, label: pn.text || 'Scene', parentNodeId: nid, viewportWhenLeft: { x: 0, y: 0, scale: 1 } });
+      cur = pn.innerScene;
+    }
+  }
+
   function easeInOut(t) { return t < 0.5 ? 2*t*t : -1+(4-2*t)*t; }
   function animateViewportTo(targetVp, durationMs, onDone) {
     var start = JSON.parse(JSON.stringify(viewport));
@@ -464,6 +489,11 @@ export function exportToHTML(rootScene: Scene, _sceneStack: SceneLevel[]): strin
       }
       var cam = sceneCameras[tourIndex++];
       if (btn) btn.textContent = '■ Stop';
+      if (cam.scenePath && cam.scenePath.length > 0) {
+        navigateToScenePath(cam.scenePath);
+      } else if (sceneStack.length > 1) {
+        sceneStack = [{ scene: sceneData, label: 'World', parentNodeId: null, viewportWhenLeft: { x: 0, y: 0, scale: 1 } }];
+      }
       animateViewportTo(cam.viewport, cam.transitionMs || 600, function() {
         setTimeout(playNext, cam.duration || 2000);
       });

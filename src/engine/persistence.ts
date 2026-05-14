@@ -48,7 +48,7 @@ export function exportToFile(state: PersistedState): void {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 100);
 }
 
 export function importFromFile(): Promise<PersistedState> {

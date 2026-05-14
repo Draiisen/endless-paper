@@ -1,4 +1,5 @@
 import { test, expect, Page } from '@playwright/test';
+import { readFileSync } from 'fs';
 
 // ── Shared scene fixture ────────────────────────────────────────────────────
 // viewport: { x:640, y:400, scale:1 }
@@ -269,6 +270,186 @@ test('portal navigation — clicking portal node in viewer mode navigates to tar
   // inner-world background is #fff0e0 = rgb(255,240,224)
   expect(bgAfter).toBe('255,240,224');
   expect(bgAfter).not.toBe(bgBefore);
+});
+
+// ── Helpers shared by new tests ──────────────────────────────────────────────
+
+async function getIDBNodeCount(page: Page): Promise<number> {
+  return page.evaluate(async () => {
+    return new Promise<number>((resolve) => {
+      const req = indexedDB.open('endless-paper', 1);
+      req.onsuccess = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains('state')) { resolve(0); return; }
+        const tx = db.transaction('state', 'readonly');
+        const gr = tx.objectStore('state').get('autosave');
+        gr.onsuccess = () => resolve((gr.result as any)?.rootScene?.nodes?.length ?? 0);
+        gr.onerror = () => resolve(0);
+      };
+      req.onerror = () => resolve(0);
+    });
+  });
+}
+
+async function getIDBAssetCount(page: Page): Promise<number> {
+  return page.evaluate(async () => {
+    return new Promise<number>((resolve) => {
+      const req = indexedDB.open('endless-paper', 1);
+      req.onsuccess = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains('state')) { resolve(0); return; }
+        const tx = db.transaction('state', 'readonly');
+        const gr = tx.objectStore('state').get('autosave');
+        gr.onsuccess = () => resolve((gr.result as any)?.assets?.length ?? 0);
+        gr.onerror = () => resolve(0);
+      };
+      req.onerror = () => resolve(0);
+    });
+  });
+}
+
+async function idbHasRecord(page: Page): Promise<boolean> {
+  return page.evaluate(async () => {
+    return new Promise<boolean>((resolve) => {
+      const req = indexedDB.open('endless-paper', 1);
+      req.onsuccess = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains('state')) { resolve(false); return; }
+        const tx = db.transaction('state', 'readonly');
+        const gr = tx.objectStore('state').get('autosave');
+        gr.onsuccess = () => resolve(!!gr.result);
+        gr.onerror = () => resolve(false);
+      };
+      req.onerror = () => resolve(false);
+    });
+  });
+}
+
+// ── New tests ─────────────────────────────────────────────────────────────────
+
+test('export .endless.json — Save button downloads valid PersistedState', async ({ page }) => {
+  await seedLocalStorage(page);
+  await page.goto('/');
+  await waitForCanvas(page);
+
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    page.getByRole('button', { name: 'Save', exact: true }).click(),
+  ]);
+
+  const filePath = await download.path();
+  expect(filePath).not.toBeNull();
+  const raw = readFileSync(filePath!, 'utf8');
+  const parsed = JSON.parse(raw);
+
+  expect(parsed.version).toBe(1);
+  expect(parsed.rootScene).toBeDefined();
+  expect(Array.isArray(parsed.rootScene.nodes)).toBe(true);
+  expect(parsed.rootScene.nodes.length).toBeGreaterThan(0);
+  expect(typeof parsed.savedAt).toBe('number');
+  expect(parsed.savedAt).toBeGreaterThan(0);
+  expect(Array.isArray(parsed.assets)).toBe(true);
+});
+
+test('import .endless.json — Load button restores scene from file', async ({ page }) => {
+  await page.goto('/');
+  await waitForCanvas(page);
+
+  const importedScene = {
+    id: 'imported-scene',
+    background: '#ccffcc',
+    nodes: [
+      { id: 'n1', type: 'rect', x: 10, y: 10, width: 80, height: 60, fill: '#ff6600', stroke: 'none', strokeWidth: 0 },
+      { id: 'n2', type: 'rect', x: 200, y: 100, width: 50, height: 50, fill: '#0066ff', stroke: 'none', strokeWidth: 0 },
+    ],
+  };
+  const fileContent = JSON.stringify({
+    version: 1,
+    rootScene: importedScene,
+    viewport: { x: 400, y: 300, scale: 1 },
+    savedAt: Date.now(),
+    assets: [],
+  });
+
+  const [fileChooser] = await Promise.all([
+    page.waitForEvent('filechooser'),
+    page.getByRole('button', { name: 'Load' }).click(),
+  ]);
+  await fileChooser.setFiles({
+    name: 'test.endless.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(fileContent),
+  });
+
+  await page.waitForTimeout(800); // autosave debounce
+
+  const nodeCount = await getIDBNodeCount(page);
+  expect(nodeCount).toBe(2);
+});
+
+test('new canvas — clears IDB so reload shows blank scene', async ({ page }) => {
+  // No seedLocalStorage here — addInitScript re-runs on reload and would re-seed.
+  // Instead: draw a stroke so the IDB gets real content, then click New.
+  await page.goto('/');
+  await waitForCanvas(page);
+
+  // Draw something to populate IDB
+  await page.keyboard.press('p');
+  await page.waitForTimeout(50);
+  await drawStroke(page, 200, 200, 400, 300);
+  await page.waitForTimeout(800); // autosave debounce
+
+  expect(await idbHasRecord(page)).toBe(true);
+  expect(await getIDBNodeCount(page)).toBeGreaterThan(0);
+
+  // Click New — confirm the dialog
+  page.once('dialog', d => d.accept());
+  await page.getByRole('button', { name: 'New', exact: true }).click();
+  await page.waitForTimeout(100);
+
+  // IDB must be cleared immediately after New
+  expect(await idbHasRecord(page)).toBe(false);
+
+  // Reload — no IDB, no localStorage → blank canvas → initial autosave writes 0 nodes
+  await page.reload();
+  await waitForCanvas(page);
+  await page.waitForTimeout(800); // initial autosave fires
+
+  const nodesAfter = await getIDBNodeCount(page);
+  expect(nodesAfter).toBe(0);
+});
+
+test('asset library — assets persist in IDB after reload', async ({ page }) => {
+  const stateWithAsset = {
+    ...SEED_STATE,
+    savedAt: Date.now(),
+    assets: [{
+      id: 'asset-1',
+      name: 'Test Asset',
+      thumbnail: '',
+      nodes: [],
+      boundingBox: { width: 100, height: 100 },
+      createdAt: 1_000_000,
+    }],
+  };
+
+  await page.addInitScript((state) => {
+    localStorage.setItem('endless-paper-autosave', JSON.stringify(state));
+  }, stateWithAsset);
+
+  await page.goto('/');
+  await waitForCanvas(page);
+  await page.waitForTimeout(800); // migration + autosave
+
+  // After first load the asset is in IDB (via migration + autosave)
+  expect(await getIDBAssetCount(page)).toBe(1);
+
+  // Reload — must still have 1 asset from IDB
+  await page.reload();
+  await waitForCanvas(page);
+  await page.waitForTimeout(300);
+
+  expect(await getIDBAssetCount(page)).toBe(1);
 });
 
 test('layer lock / visibility — locked-layer node cannot be selected', async ({ page }) => {
