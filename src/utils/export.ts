@@ -198,6 +198,42 @@ export function exportToHTML(rootScene: Scene, _sceneStack: SceneLevel[]): strin
   var dragNode = null;
   var dragOffset = { x: 0, y: 0 };
 
+  function showHotspotPopup(node, screenX, screenY) {
+    dismissPopup();
+    var hs = node.hotspot;
+    if (!hs) return;
+    var el;
+    if (hs.type === 'text') {
+      el = document.createElement('div');
+      el.style.cssText = 'position:fixed;z-index:100;background:rgba(26,26,46,0.95);color:#fff;padding:12px 16px;border-radius:10px;max-width:320px;font-size:14px;line-height:1.5;box-shadow:0 4px 20px rgba(0,0,0,0.4);backdrop-filter:blur(8px);';
+      if (hs.title) { var h = document.createElement('div'); h.style.cssText='font-weight:700;margin-bottom:6px;font-size:15px;'; h.textContent=hs.title; el.appendChild(h); }
+      var p = document.createElement('div'); p.textContent = hs.content; el.appendChild(p);
+      var close = document.createElement('button'); close.textContent='×'; close.style.cssText='position:absolute;top:6px;right:10px;background:none;border:none;color:#aaa;font-size:18px;cursor:pointer;line-height:1;'; close.onclick=dismissPopup; el.appendChild(close);
+      el.style.left = Math.min(screenX + 12, window.innerWidth - 340) + 'px';
+      el.style.top = Math.max(10, screenY - 20) + 'px';
+    } else {
+      // Window modal
+      var overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;inset:0;z-index:99;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;';
+      overlay.onclick = function(ev) { if (ev.target === overlay) dismissPopup(); };
+      el = document.createElement('div');
+      el.style.cssText = 'background:rgba(26,26,46,0.98);color:#fff;padding:24px;border-radius:12px;max-width:' + (hs.width || 400) + 'px;width:90%;max-height:' + (hs.height || 500) + 'px;overflow-y:auto;box-shadow:0 8px 40px rgba(0,0,0,0.6);position:relative;';
+      if (hs.title) { var h2 = document.createElement('h2'); h2.style.cssText='margin:0 0 12px;font-size:18px;'; h2.textContent=hs.title; el.appendChild(h2); }
+      var p2 = document.createElement('div'); p2.style.cssText='font-size:14px;line-height:1.6;'; p2.textContent = hs.content; el.appendChild(p2);
+      var close2 = document.createElement('button'); close2.textContent='Close'; close2.style.cssText='margin-top:16px;padding:8px 20px;background:#4a90d9;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;'; close2.onclick=dismissPopup; el.appendChild(close2);
+      overlay.appendChild(el);
+      document.body.appendChild(overlay);
+      activePopup = overlay;
+      return;
+    }
+    document.body.appendChild(el);
+    activePopup = el;
+  }
+
+  function dismissPopup() {
+    if (activePopup) { activePopup.remove(); activePopup = null; }
+  }
+
   canvas.addEventListener('pointerdown', function(e) {
     if (e.button === 1 || e.button === 0) {
       isPanning = e.button === 1;
@@ -208,10 +244,17 @@ export function exportToHTML(rootScene: Scene, _sceneStack: SceneLevel[]): strin
         var w = screenToWorld(e.clientX, e.clientY);
         var node = getNodeAt(w.x, w.y);
         if (node) {
+          // Hotspot click handler
+          if (node.hotspot && node.hotspot.trigger === 'click') {
+            showHotspotPopup(node, e.clientX, e.clientY);
+            render();
+            return;
+          }
           selectedNode = node;
           dragNode = node;
           dragOffset = { x: w.x - node.x, y: w.y - node.y };
         } else {
+          dismissPopup();
           selectedNode = null;
           dragNode = null;
           isPanning = true;
@@ -245,10 +288,12 @@ export function exportToHTML(rootScene: Scene, _sceneStack: SceneLevel[]): strin
     var now = Date.now();
     var dist = Math.hypot(e.clientX - lastClickPos.x, e.clientY - lastClickPos.y);
     if (now - lastClickTime < 400 && dist < 10) {
-      // Double click — enter inner scene
+      // Double click — enter inner scene or hotspot doubleclick
       var w = screenToWorld(e.clientX, e.clientY);
       var node = getNodeAt(w.x, w.y);
-      if (node && node.innerScene && node.innerScene.nodes.length > 0) {
+      if (node && node.hotspot && node.hotspot.trigger === 'doubleclick') {
+        showHotspotPopup(node, e.clientX, e.clientY);
+      } else if (node && node.innerScene && node.innerScene.nodes.length > 0) {
         sceneStack[sceneStack.length - 1].viewportWhenLeft = JSON.parse(JSON.stringify(viewport));
         sceneStack.push({ scene: node.innerScene, label: 'Scene ' + (sceneStack.length), parentNodeId: node.id, viewportWhenLeft: { x: canvas.width/2, y: canvas.height/2, scale: 1 } });
         viewport = { x: canvas.width/2, y: canvas.height/2, scale: 1 };
@@ -319,6 +364,46 @@ export function exportToHTML(rootScene: Scene, _sceneStack: SceneLevel[]): strin
     if (e.touches.length === 0) { touch1 = null; isPanning = false; }
   }, { passive: false });
 
+  // Camera tour
+  var tourIndex = 0;
+  var tourRunning = false;
+  function easeInOut(t) { return t < 0.5 ? 2*t*t : -1+(4-2*t)*t; }
+  function animateViewportTo(targetVp, durationMs, onDone) {
+    var start = JSON.parse(JSON.stringify(viewport));
+    var startTime = Date.now();
+    function step() {
+      var elapsed = Date.now() - startTime;
+      var t = Math.min(1, elapsed / durationMs);
+      var e = easeInOut(t);
+      viewport.x = start.x + (targetVp.x - start.x) * e;
+      viewport.y = start.y + (targetVp.y - start.y) * e;
+      viewport.scale = start.scale + (targetVp.scale - start.scale) * e;
+      render();
+      if (t < 1) { requestAnimationFrame(step); } else if (onDone) { onDone(); }
+    }
+    requestAnimationFrame(step);
+  }
+  window.playTour = function() {
+    if (!sceneCameras || sceneCameras.length === 0) return;
+    if (tourRunning) { tourRunning = false; return; }
+    tourRunning = true;
+    tourIndex = 0;
+    var btn = document.getElementById('tour-btn');
+    function playNext() {
+      if (!tourRunning || tourIndex >= sceneCameras.length) {
+        tourRunning = false;
+        if (btn) btn.textContent = '▶ Play';
+        return;
+      }
+      var cam = sceneCameras[tourIndex++];
+      if (btn) btn.textContent = '■ Stop';
+      animateViewportTo(cam.viewport, cam.transitionMs || 600, function() {
+        setTimeout(playNext, cam.duration || 2000);
+      });
+    }
+    playNext();
+  };
+
   window.addEventListener('resize', resize);
   resize();
 })();
@@ -355,6 +440,7 @@ export function exportToHTML(rootScene: Scene, _sceneStack: SceneLevel[]): strin
     <span style="color:#4a90d9;font-weight:700;margin-right:8px">✏ Endless Paper</span>
     <div id="breadcrumb"></div>
     <span id="hint">Double-click to enter scenes · Scroll to zoom · Drag to pan</span>
+    ${camerasData !== 'null' ? `<button id="tour-btn" onclick="playTour()" style="padding:4px 12px;background:#4a90d9;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:600;">▶ Play</button>` : ''}
     <span id="zoom">100%</span>
   </div>
   <canvas id="canvas" style="margin-top:40px"></canvas>

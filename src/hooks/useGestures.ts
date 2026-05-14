@@ -54,9 +54,8 @@ export function useGestures(
   const lastPointer = useRef<Point>({ x: 0, y: 0 });
   const rawPoints = useRef<Point[]>([]);
   const livePointsRef = useRef<Point[]>([]);
-  // Lazy brush position for stabilizer (wired in future pass)
+  // Lazy brush position for stabilizer
   const brushPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
-  void getStabilizer; void brushPosRef;
   const shapeStartRef = useRef<Point | null>(null);
   const shapeEndRef = useRef<Point | null>(null);
   const marqueeStartRef = useRef<Point | null>(null);
