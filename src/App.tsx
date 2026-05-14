@@ -13,6 +13,7 @@ import { SavesModal } from './components/SavesModal';
 import { useHistory } from './hooks/useHistory';
 import { exportToFile, importFromFile, clearLocalStorage, saveSettings, AppSettings } from './engine/persistence';
 import { saveToIDB, clearIDB } from './engine/idb-store';
+import { generateThumbnail, requestColorVectorization } from './engine/lod-manager';
 import { audioManager } from './engine/audio-manager';
 
 function makeInitialViewport(): Viewport {
@@ -509,15 +510,33 @@ export default function App({ initialState, settings }: AppProps) {
         const node = createNode('image', cx, cy, w, h);
         node.imageData = dataUrl;
         node.layerId = activeLayerId || undefined;
+        // Thumbnail: fast, synchronous, ready immediately
+        node.lod = { thumbnail: generateThumbnail(img) };
+
         const newScene = addNode(sceneRef.current, node);
         setScene(newScene);
         handleSceneChange(newScene, viewport);
+
+        // Color-vector LOD: runs in a Web Worker, updates scene when done
+        requestColorVectorization(node, img, 8, (nodeId, colorLayers) => {
+          const cur = sceneRef.current;
+          const updated = {
+            ...cur,
+            nodes: cur.nodes.map(n =>
+              n.id === nodeId
+                ? { ...n, lod: { ...(n.lod ?? {}), colorLayers } }
+                : n,
+            ),
+          };
+          setScene(updated);
+          scheduleAutoSave();
+        });
       };
       img.src = dataUrl;
     };
     reader.readAsDataURL(file);
     setTool('select');
-  }, [viewport, activeLayerId, setScene, handleSceneChange]);
+  }, [viewport, activeLayerId, setScene, handleSceneChange, scheduleAutoSave]);
 
   // Minimap teleport
   const handleMiniMapTeleport = useCallback((worldX: number, worldY: number) => {

@@ -354,13 +354,7 @@ function drawNode(
       break;
 
     case 'image':
-      if (node.isVectorized && node.vectorPaths && node.vectorPaths.length > 0) {
-        for (const vp of node.vectorPaths) {
-          drawVectorPath(ctx, vp);
-        }
-      } else if (node.imageData) {
-        drawImage(ctx, node);
-      }
+      drawImageLOD(ctx, node, viewportScale);
       break;
 
     case 'rect':
@@ -558,6 +552,46 @@ function drawVectorPath(ctx: CanvasRenderingContext2D, vp: VectorPath): void {
 }
 
 export const imageCache = new LRUImageCache(50);
+
+/**
+ * LOD thresholds (in screen pixels, i.e. node.width * viewportScale):
+ *   < 70px  → thumbnail (fast, low detail)
+ *   70-350px → raster original  (faithful)
+ *   > 350px  → color vectors if available (crisp at any zoom)
+ * Legacy monochrome vectorPaths are used as a fallback when colorLayers not yet ready.
+ */
+function drawImageLOD(ctx: CanvasRenderingContext2D, node: SceneNode, viewportScale: number): void {
+  const screenW = node.width * viewportScale;
+
+  // ── High zoom: colour vectors ────────────────────────────────────────────
+  if (screenW > 350 && node.lod?.colorLayers && node.lod.colorLayers.length > 0) {
+    for (const layer of node.lod.colorLayers) {
+      ctx.fillStyle = layer.color;
+      for (const vp of layer.paths) {
+        ctx.fill(getPath2D(vp.d));
+      }
+    }
+    return;
+  }
+
+  // ── Low zoom: thumbnail ───────────────────────────────────────────────────
+  if (screenW < 70 && node.lod?.thumbnail) {
+    const img = imageCache.get(node.lod.thumbnail);
+    if (img.complete && img.naturalWidth > 0) {
+      ctx.drawImage(img, node.x, node.y, node.width, node.height);
+      return;
+    }
+  }
+
+  // ── Legacy monochrome vectorization (manual "Vectorize" button) ───────────
+  if (node.isVectorized && node.vectorPaths && node.vectorPaths.length > 0) {
+    for (const vp of node.vectorPaths) drawVectorPath(ctx, vp);
+    return;
+  }
+
+  // ── Default: draw the original raster ────────────────────────────────────
+  if (node.imageData) drawImage(ctx, node);
+}
 
 function drawImage(ctx: CanvasRenderingContext2D, node: SceneNode): void {
   if (!node.imageData) return;

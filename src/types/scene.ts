@@ -102,6 +102,9 @@ export interface SceneNode {
 
   // Marks reference image (renders below all)
   isReference?: boolean;
+
+  // Level-of-detail data generated automatically on image import
+  lod?: ImageLOD;
 }
 
 export interface Layer {
@@ -163,6 +166,16 @@ export interface Asset {
   boundingBox: { width: number; height: number };
   createdAt: number;
   tags?: string[];
+}
+
+export interface ColorLayer {
+  color: string;        // CSS color of this cluster
+  paths: VectorPath[];  // paths already in world-space coordinates
+}
+
+export interface ImageLOD {
+  thumbnail?: string;          // 64px JPEG for tiny zoom-out preview
+  colorLayers?: ColorLayer[];  // multi-color vector, world-space
 }
 
 export interface BrushStamp {
