@@ -1,37 +1,36 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { Scene, ToolType, Viewport, SceneLevel, PersistedState } from './types/scene';
-import { createScene, createNode, addNode } from './engine/scene-graph';
+import { Scene, ToolType, Viewport, SceneLevel, PersistedState, Asset, Layer, SceneAudio, StartCamera, SymmetryMode } from './types/scene';
+import { createScene, createNode, addNode, ensureLayers, createLayer, buildSceneCatalog, generateId, getBoundingBox } from './engine/scene-graph';
 import { Canvas, CanvasHandle } from './components/Canvas';
 import { Toolbar } from './components/Toolbar';
 import { ExportModal } from './components/ExportModal';
+import { AssetLibrary } from './components/AssetLibrary';
+import { LayersPanel } from './components/LayersPanel';
+import { MiniMap } from './components/MiniMap';
+import { PropertiesPanel } from './components/PropertiesPanel';
+import { PopupDisplay, useHotspotHandler } from './components/PopupRenderer';
 import { useHistory } from './hooks/useHistory';
-import { saveToLocalStorage, loadFromLocalStorage, exportToFile, importFromFile, clearLocalStorage } from './engine/persistence';
+import { saveToLocalStorage, loadFromLocalStorage, exportToFile, importFromFile, clearLocalStorage, loadSettings, saveSettings, AppSettings } from './engine/persistence';
+import { audioManager } from './engine/audio-manager';
 
 function makeInitialViewport(): Viewport {
   return { x: window.innerWidth / 2 - 200, y: window.innerHeight / 2 - 150, scale: 1 };
 }
 
 function createInitialSceneStack(scene: Scene, vp: Viewport): SceneLevel[] {
-  return [
-    {
-      scene,
-      parentNodeId: '',
-      label: 'World',
-      viewportWhenLeft: vp,
-    },
-  ];
+  return [{ scene, parentNodeId: '', label: 'World', viewportWhenLeft: vp }];
 }
 
-// One-shot loader to avoid showing an empty scene before localStorage is read
-function loadInitial(): { scene: Scene; viewport: Viewport } {
+function loadInitial(): { scene: Scene; viewport: Viewport; assets: Asset[]; settings: AppSettings } {
   const stored = loadFromLocalStorage();
+  const settings = loadSettings();
   if (stored) {
-    return { scene: stored.rootScene, viewport: stored.viewport };
+    return { scene: stored.rootScene, viewport: stored.viewport, assets: stored.assets ?? [], settings };
   }
-  return { scene: createScene(), viewport: makeInitialViewport() };
+  return { scene: createScene(), viewport: makeInitialViewport(), assets: [], settings };
 }
 
-const _initialLoad = loadInitial();
+const _init = loadInitial();
 
 export default function App() {
   const [tool, setTool] = useState<ToolType>('pen');
@@ -40,30 +39,71 @@ export default function App() {
   const [strokeWidth, setStrokeWidth] = useState(2);
   const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(new Set());
   const [showExport, setShowExport] = useState(false);
-  const [viewport, setViewport] = useState<Viewport>(_initialLoad.viewport);
+  const [viewport, setViewport] = useState<Viewport>(_init.viewport);
   const [pressureEnabled, setPressureEnabled] = useState(true);
   const [autoEnterEnabled, setAutoEnterEnabled] = useState(true);
   const [showSavedFlash, setShowSavedFlash] = useState(false);
-  const savedFlashTimerRef = useRef<number | null>(null);
+  const [assets, setAssets] = useState<Asset[]>(_init.assets);
+  const [showLibrary, setShowLibrary] = useState(false);
+  const [showLayers, setShowLayers] = useState(false);
+  const [showMiniMap, setShowMiniMap] = useState(_init.settings.miniMapVisible ?? true);
+  const [showProperties, setShowProperties] = useState(false);
+  const [activeLayerId, setActiveLayerId] = useState<string>('');
+  const [symmetry, setSymmetry] = useState<SymmetryMode>(_init.settings.symmetry as SymmetryMode ?? 'off');
+  const [stabilizer, setStabilizer] = useState(_init.settings.stabilizer ?? 0);
+  const [showReference, setShowReference] = useState(_init.settings.showReference ?? true);
+  const [audioMuted, setAudioMuted] = useState(_init.settings.audioMuted ?? false);
+  const [viewerMode, setViewerMode] = useState(false);
+  const [tourPlaying, setTourPlaying] = useState(false);
 
-  const history = useHistory(_initialLoad.scene, _initialLoad.viewport);
-  const [scene, setSceneState] = useState<Scene>(_initialLoad.scene);
-  const [sceneStack, setSceneStackState] = useState<SceneLevel[]>(createInitialSceneStack(_initialLoad.scene, _initialLoad.viewport));
+  const { popup, handleNodeClick, dismiss: dismissPopup } = useHotspotHandler(viewerMode);
+
+  const savedFlashTimerRef = useRef<number | null>(null);
+  const autoSaveTimerRef = useRef<number | null>(null);
+  const canvasHandleRef = useRef<CanvasHandle | null>(null);
+
+  const history = useHistory(_init.scene, _init.viewport);
+  const [scene, setSceneState] = useState<Scene>(_init.scene);
+  const [sceneStack, setSceneStackState] = useState<SceneLevel[]>(createInitialSceneStack(_init.scene, _init.viewport));
 
   const sceneRef = useRef(scene);
   const sceneStackRef = useRef(sceneStack);
-  const rootSceneRef = useRef(_initialLoad.scene);
+  const rootSceneRef = useRef(_init.scene);
   const viewportRef = useRef(viewport);
-  const canvasHandleRef = useRef<CanvasHandle | null>(null);
-  const autoSaveTimerRef = useRef<number | null>(null);
+  const assetsRef = useRef(assets);
 
   useEffect(() => { sceneRef.current = scene; }, [scene]);
   useEffect(() => { sceneStackRef.current = sceneStack; }, [sceneStack]);
   useEffect(() => { viewportRef.current = viewport; }, [viewport]);
+  useEffect(() => { assetsRef.current = assets; }, [assets]);
 
-  // If we initialized with a default viewport but the window has since resized
-  // (e.g. orientation flip on mobile happened between module load and mount),
-  // recenter the viewport when the canvas is empty.
+  // Sync active layer when scene changes
+  useEffect(() => {
+    const layers = ensureLayers(scene);
+    if (!activeLayerId || !layers.find(l => l.id === activeLayerId)) {
+      setActiveLayerId(layers[0]?.id ?? '');
+    }
+  }, [scene, activeLayerId]);
+
+  // Audio
+  useEffect(() => {
+    audioManager.setMuted(audioMuted);
+  }, [audioMuted]);
+
+  useEffect(() => {
+    if (viewerMode) {
+      audioManager.play(scene.audio);
+    } else {
+      audioManager.stop();
+    }
+  }, [scene, viewerMode]);
+
+  // Persist settings
+  useEffect(() => {
+    saveSettings({ stabilizer, symmetry, miniMapVisible: showMiniMap, audioMuted, showReference });
+  }, [stabilizer, symmetry, showMiniMap, audioMuted, showReference]);
+
+  // Recenter on first mount if canvas is empty
   const didRecenterRef = useRef(false);
   useEffect(() => {
     if (didRecenterRef.current) return;
@@ -77,37 +117,29 @@ export default function App() {
     }
   }, []);
 
-  // Compute the root scene from sceneStack[0], with current scene merged in if at root.
   const getRootScene = useCallback((): Scene => {
     const stack = sceneStackRef.current;
-    if (stack.length === 0) return sceneRef.current;
-    if (stack.length === 1) return sceneRef.current; // we are at root
-    return stack[0].scene;
+    return stack.length <= 1 ? sceneRef.current : stack[0].scene;
   }, []);
 
   const triggerSavedFlash = useCallback(() => {
     setShowSavedFlash(true);
-    if (savedFlashTimerRef.current !== null) {
-      window.clearTimeout(savedFlashTimerRef.current);
-    }
+    if (savedFlashTimerRef.current !== null) window.clearTimeout(savedFlashTimerRef.current);
     savedFlashTimerRef.current = window.setTimeout(() => {
       setShowSavedFlash(false);
       savedFlashTimerRef.current = null;
     }, 1000);
   }, []);
 
-  // Auto-save (debounced)
   const scheduleAutoSave = useCallback(() => {
-    if (autoSaveTimerRef.current !== null) {
-      window.clearTimeout(autoSaveTimerRef.current);
-    }
+    if (autoSaveTimerRef.current !== null) window.clearTimeout(autoSaveTimerRef.current);
     autoSaveTimerRef.current = window.setTimeout(() => {
-      const root = getRootScene();
       const state: PersistedState = {
         version: 1,
-        rootScene: root,
+        rootScene: getRootScene(),
         viewport: viewportRef.current,
         savedAt: Date.now(),
+        assets: assetsRef.current,
       };
       saveToLocalStorage(state);
       triggerSavedFlash();
@@ -123,25 +155,18 @@ export default function App() {
   const setSceneStack = useCallback((stack: SceneLevel[]) => {
     setSceneStackState(stack);
     sceneStackRef.current = stack;
-    if (stack.length > 0) {
-      rootSceneRef.current = stack[0].scene;
-    }
+    if (stack.length > 0) rootSceneRef.current = stack[0].scene;
   }, []);
 
   const handleSceneChange = useCallback((s: Scene, vp: Viewport) => {
     history.push(s, vp);
     const stack = sceneStackRef.current;
     const lastIdx = stack.length - 1;
-    const newStack = stack.map((entry, i) =>
-      i === lastIdx ? { ...entry, scene: s } : entry
-    );
-    // If we're at root, the new scene IS the root
+    const newStack = stack.map((entry, i) => i === lastIdx ? { ...entry, scene: s } : entry);
     if (newStack.length === 1) {
       rootSceneRef.current = s;
       newStack[0] = { ...newStack[0], scene: s };
     } else {
-      // Propagate the change up through parents: replace the parent node's innerScene
-      // We rebuild the chain from the bottom up.
       let current = s;
       for (let i = newStack.length - 1; i > 0; i--) {
         const parentEntry = newStack[i - 1];
@@ -149,9 +174,7 @@ export default function App() {
         const parentNodeId = newStack[i].parentNodeId;
         const updatedParent: Scene = {
           ...parentScene,
-          nodes: parentScene.nodes.map(n =>
-            n.id === parentNodeId ? { ...n, innerScene: current } : n
-          ),
+          nodes: parentScene.nodes.map(n => n.id === parentNodeId ? { ...n, innerScene: current } : n),
         };
         newStack[i - 1] = { ...parentEntry, scene: updatedParent };
         current = updatedParent;
@@ -163,21 +186,15 @@ export default function App() {
     scheduleAutoSave();
   }, [history, scheduleAutoSave]);
 
-  // Initial save on mount (debounced)
-  useEffect(() => {
-    scheduleAutoSave();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  useEffect(() => { scheduleAutoSave(); }, []); // eslint-disable-line
 
   const handleUndo = useCallback(() => {
     const entry = history.undo();
     if (entry) {
       setScene(entry.scene);
       setViewport(entry.viewport);
-      // Reflect into the current stack frame
       const stack = sceneStackRef.current;
-      const lastIdx = stack.length - 1;
-      const newStack = stack.map((e, i) => i === lastIdx ? { ...e, scene: entry.scene } : e);
+      const newStack = stack.map((e, i) => i === stack.length - 1 ? { ...e, scene: entry.scene } : e);
       setSceneStackState(newStack);
       sceneStackRef.current = newStack;
       if (newStack.length === 1) rootSceneRef.current = entry.scene;
@@ -191,8 +208,7 @@ export default function App() {
       setScene(entry.scene);
       setViewport(entry.viewport);
       const stack = sceneStackRef.current;
-      const lastIdx = stack.length - 1;
-      const newStack = stack.map((e, i) => i === lastIdx ? { ...e, scene: entry.scene } : e);
+      const newStack = stack.map((e, i) => i === stack.length - 1 ? { ...e, scene: entry.scene } : e);
       setSceneStackState(newStack);
       sceneStackRef.current = newStack;
       if (newStack.length === 1) rootSceneRef.current = entry.scene;
@@ -203,21 +219,16 @@ export default function App() {
   const navigateTo = useCallback((index: number) => {
     const stack = sceneStackRef.current;
     if (index >= stack.length - 1) return;
-
     const updatedStack = stack.map((entry, i) =>
       i === stack.length - 1 ? { ...entry, viewportWhenLeft: viewport } : entry
     );
-
     const targetEntry = updatedStack[index];
-
     const finishNav = () => {
       setScene(targetEntry.scene);
       setViewport(targetEntry.viewportWhenLeft);
       setSceneStack(updatedStack.slice(0, index + 1));
       setSelectedNodeIds(new Set());
     };
-
-    // Animate a zoom-out before swapping to give a sense of leaving the inner scene
     const handle = canvasHandleRef.current;
     if (handle && index === stack.length - 2) {
       const cur = viewportRef.current;
@@ -225,26 +236,188 @@ export default function App() {
       const cy = window.innerHeight / 2;
       const targetScale = Math.max(0.001, cur.scale * 0.4);
       const factor = targetScale / cur.scale;
-      const animTarget: Viewport = {
-        x: cx - (cx - cur.x) * factor,
-        y: cy - (cy - cur.y) * factor,
-        scale: targetScale,
-      };
-      handle.animateViewportTo(animTarget, finishNav);
+      handle.animateViewportTo(
+        { x: cx - (cx - cur.x) * factor, y: cy - (cy - cur.y) * factor, scale: targetScale },
+        finishNav
+      );
     } else {
       finishNav();
     }
   }, [viewport, setScene, setSceneStack]);
 
+  // Layer operations
+  const handleAddLayer = useCallback(() => {
+    const layers = ensureLayers(sceneRef.current);
+    const newLayer = createLayer(`Layer ${layers.length + 1}`);
+    const newScene = { ...sceneRef.current, layers: [...layers, newLayer] };
+    setScene(newScene);
+    handleSceneChange(newScene, viewportRef.current);
+    setActiveLayerId(newLayer.id);
+  }, [setScene, handleSceneChange]);
+
+  const handleDeleteLayer = useCallback((id: string) => {
+    const layers = ensureLayers(sceneRef.current);
+    if (layers.length <= 1) return;
+    if (!confirm('Delete layer? Nodes on this layer will be moved to the first layer.')) return;
+    const firstId = layers.find(l => l.id !== id)?.id ?? '';
+    const newLayers = layers.filter(l => l.id !== id);
+    const newNodes = sceneRef.current.nodes.map(n => n.layerId === id ? { ...n, layerId: firstId } : n);
+    const newScene = { ...sceneRef.current, layers: newLayers, nodes: newNodes };
+    setScene(newScene);
+    handleSceneChange(newScene, viewportRef.current);
+    if (activeLayerId === id) setActiveLayerId(firstId);
+  }, [setScene, handleSceneChange, activeLayerId]);
+
+  const handleUpdateLayer = useCallback((id: string, updates: Partial<Layer>) => {
+    const layers = ensureLayers(sceneRef.current);
+    const newScene = { ...sceneRef.current, layers: layers.map(l => l.id === id ? { ...l, ...updates } : l) };
+    setScene(newScene);
+    handleSceneChange(newScene, viewportRef.current);
+  }, [setScene, handleSceneChange]);
+
+  const handleReorderLayer = useCallback((fromIdx: number, toIdx: number) => {
+    const layers = [...ensureLayers(sceneRef.current)];
+    const [item] = layers.splice(fromIdx, 1);
+    layers.splice(toIdx, 0, item);
+    const newScene = { ...sceneRef.current, layers };
+    setScene(newScene);
+    handleSceneChange(newScene, viewportRef.current);
+  }, [setScene, handleSceneChange]);
+
+  // Asset operations
+  const handleSaveToLibrary = useCallback(async () => {
+    const ids = Array.from(selectedNodeIds);
+    if (ids.length === 0) return;
+    const selectedNodes = sceneRef.current.nodes.filter(n => ids.includes(n.id));
+    if (selectedNodes.length === 0) return;
+    const name = prompt('Asset name:', 'New Asset');
+    if (!name) return;
+    const bb = getBoundingBox(selectedNodes);
+
+    // Generate thumbnail via offscreen canvas
+    const offscreen = document.createElement('canvas');
+    offscreen.width = 128;
+    offscreen.height = 128;
+    const ctx = offscreen.getContext('2d');
+    let thumbnail = '';
+    if (ctx) {
+      const scale = Math.min(120 / Math.max(bb.width, 1), 120 / Math.max(bb.height, 1));
+      const vp: Viewport = {
+        x: -bb.x * scale + (128 - bb.width * scale) / 2,
+        y: -bb.y * scale + (128 - bb.height * scale) / 2,
+        scale,
+      };
+      ctx.fillStyle = '#f8f7f4';
+      ctx.fillRect(0, 0, 128, 128);
+      // Render synchronously using the already-loaded renderer
+      { const { renderScene } = await import('./engine/renderer');
+        renderScene(ctx, { ...sceneRef.current, nodes: selectedNodes }, vp, { showGrid: false }); }
+      thumbnail = offscreen.toDataURL('image/png');
+    }
+
+    const asset: Asset = {
+      id: generateId(),
+      name,
+      thumbnail,
+      nodes: selectedNodes.map(n => ({ ...n, id: generateId() })),
+      boundingBox: { width: bb.width, height: bb.height },
+      createdAt: Date.now(),
+    };
+    const newAssets = [...assetsRef.current, asset];
+    setAssets(newAssets);
+  }, [selectedNodeIds]);
+
+  const handleDeleteAsset = useCallback((id: string) => {
+    setAssets(prev => prev.filter(a => a.id !== id));
+  }, []);
+
+  const handlePlaceAsset = useCallback((asset: Asset) => {
+    const cx = (window.innerWidth / 2 - viewportRef.current.x) / viewportRef.current.scale;
+    const cy = (window.innerHeight / 2 - viewportRef.current.y) / viewportRef.current.scale;
+    const bb = asset.boundingBox;
+    const offsetX = cx - bb.width / 2;
+    const offsetY = cy - bb.height / 2;
+    const newNodes = asset.nodes.map(n => ({ ...n, id: generateId(), x: n.x + offsetX, y: n.y + offsetY }));
+    let newScene = sceneRef.current;
+    for (const node of newNodes) newScene = addNode(newScene, node);
+    setScene(newScene);
+    handleSceneChange(newScene, viewportRef.current);
+    setShowLibrary(false);
+  }, [setScene, handleSceneChange]);
+
+  // Start camera
+  const handleSetStartCamera = useCallback(() => {
+    const stack = sceneStackRef.current;
+    const scenePath = stack.slice(1).map(e => e.parentNodeId);
+    const startCamera: StartCamera = { viewport: viewportRef.current, scenePath };
+    const root = getRootScene();
+    const newRoot = { ...root, startCamera };
+    rootSceneRef.current = newRoot;
+    if (stack.length === 1) {
+      setScene(newRoot);
+      handleSceneChange(newRoot, viewportRef.current);
+    } else {
+      const newStack = [...stack];
+      newStack[0] = { ...newStack[0], scene: newRoot };
+      setSceneStack(newStack);
+    }
+    scheduleAutoSave();
+  }, [getRootScene, setScene, handleSceneChange, setSceneStack, scheduleAutoSave]);
+
+  const handleResetToStart = useCallback(() => {
+    const root = getRootScene();
+    if (!root.startCamera) return;
+    const { viewport: sv, scenePath } = root.startCamera;
+    // Navigate to root first, then enter scenes along path
+    setScene(root);
+    setViewport(sv);
+    setSceneStack(createInitialSceneStack(root, sv));
+    setSelectedNodeIds(new Set());
+    // For now just go to root with saved viewport — deep path traversal is complex
+    void scenePath;
+  }, [getRootScene, setScene, setSceneStack]);
+
+  // Update selected node properties
+  const handleUpdateSelectedNode = useCallback((updates: Partial<import('./types/scene').SceneNode>) => {
+    if (selectedNodeIds.size !== 1) return;
+    const id = Array.from(selectedNodeIds)[0];
+    const newScene = { ...sceneRef.current, nodes: sceneRef.current.nodes.map(n => n.id === id ? { ...n, ...updates } : n) };
+    setScene(newScene);
+    handleSceneChange(newScene, viewportRef.current);
+  }, [selectedNodeIds, setScene, handleSceneChange]);
+
+  // Scene audio
+  const handleAddAudio = useCallback(() => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'audio/*';
+    input.onchange = () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      if (file.size > 2 * 1024 * 1024) { alert('Audio file must be under 2 MB.'); return; }
+      const reader = new FileReader();
+      reader.onload = () => {
+        const audio: SceneAudio = { src: reader.result as string, volume: 0.7, loop: true };
+        const newScene = { ...sceneRef.current, audio };
+        setScene(newScene);
+        handleSceneChange(newScene, viewportRef.current);
+      };
+      reader.readAsDataURL(file);
+    };
+    document.body.appendChild(input);
+    input.click();
+    document.body.removeChild(input);
+  }, [setScene, handleSceneChange]);
+
+  const handleUpdateSceneAudio = useCallback((audio: SceneAudio | undefined) => {
+    const newScene = { ...sceneRef.current, audio };
+    setScene(newScene);
+    handleSceneChange(newScene, viewportRef.current);
+  }, [setScene, handleSceneChange]);
+
   // Save / Load / New
   const handleManualSave = useCallback(() => {
-    const root = getRootScene();
-    const state: PersistedState = {
-      version: 1,
-      rootScene: root,
-      viewport: viewportRef.current,
-      savedAt: Date.now(),
-    };
+    const state: PersistedState = { version: 1, rootScene: getRootScene(), viewport: viewportRef.current, savedAt: Date.now(), assets: assetsRef.current };
     exportToFile(state);
   }, [getRootScene]);
 
@@ -255,14 +428,12 @@ export default function App() {
       const newVp = state.viewport ?? makeInitialViewport();
       setScene(newScene);
       setViewport(newVp);
-      const stack = createInitialSceneStack(newScene, newVp);
-      setSceneStack(stack);
+      setSceneStack(createInitialSceneStack(newScene, newVp));
       setSelectedNodeIds(new Set());
+      setAssets(state.assets ?? []);
       history.push(newScene, newVp);
       scheduleAutoSave();
-    } catch {
-      // Cancelled or invalid file
-    }
+    } catch { /* cancelled */ }
   }, [setScene, setSceneStack, history, scheduleAutoSave]);
 
   const handleNew = useCallback(() => {
@@ -273,99 +444,108 @@ export default function App() {
     setViewport(newVp);
     setSceneStack(createInitialSceneStack(newScene, newVp));
     setSelectedNodeIds(new Set());
+    setAssets([]);
     history.push(newScene, newVp);
     clearLocalStorage();
-    scheduleAutoSave();
-  }, [setScene, setSceneStack, history, scheduleAutoSave]);
+  }, [setScene, setSceneStack, history]);
+
+  const handleImageImport = useCallback((file: File) => {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string;
+      const img = new Image();
+      img.onload = () => {
+        const maxW = 400; const maxH = 300;
+        let w = img.naturalWidth; let h = img.naturalHeight;
+        if (w > maxW || h > maxH) { const r = Math.min(maxW / w, maxH / h); w = Math.round(w * r); h = Math.round(h * r); }
+        const cx = (window.innerWidth / 2 - viewport.x) / viewport.scale - w / 2;
+        const cy = (window.innerHeight / 2 - viewport.y) / viewport.scale - h / 2;
+        const node = createNode('image', cx, cy, w, h);
+        node.imageData = dataUrl;
+        node.layerId = activeLayerId || undefined;
+        const newScene = addNode(sceneRef.current, node);
+        setScene(newScene);
+        handleSceneChange(newScene, viewport);
+      };
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+    setTool('select');
+  }, [viewport, activeLayerId, setScene, handleSceneChange]);
+
+  // Minimap teleport
+  const handleMiniMapTeleport = useCallback((worldX: number, worldY: number) => {
+    const vp = viewportRef.current;
+    const newVp: Viewport = { ...vp, x: window.innerWidth / 2 - worldX * vp.scale, y: window.innerHeight / 2 - worldY * vp.scale };
+    canvasHandleRef.current?.animateViewportTo(newVp, () => {});
+  }, []);
+
+  // Camera tour
+  const handlePlayTour = useCallback(() => {
+    const cameras = scene.cameras;
+    if (!cameras || cameras.length === 0) return;
+    setTourPlaying(true);
+    let i = 0;
+    const playNext = () => {
+      if (i >= cameras.length) { setTourPlaying(false); return; }
+      const cam = cameras[i++];
+      canvasHandleRef.current?.animateViewportTo(cam.viewport, () => {
+        setTimeout(playNext, cam.duration);
+      });
+    };
+    playNext();
+  }, [scene.cameras]);
+
+  const handleAddCamera = useCallback(() => {
+    const stack = sceneStackRef.current;
+    const scenePath = stack.slice(1).map(e => e.parentNodeId);
+    const camera: import('./types/scene').Camera = {
+      id: generateId(),
+      name: `Camera ${(scene.cameras?.length ?? 0) + 1}`,
+      viewport: viewportRef.current,
+      scenePath,
+      duration: 2000,
+      transitionMs: 600,
+    };
+    const newScene = { ...sceneRef.current, cameras: [...(sceneRef.current.cameras ?? []), camera] };
+    setScene(newScene);
+    handleSceneChange(newScene, viewportRef.current);
+  }, [scene, setScene, handleSceneChange]);
 
   // Keyboard shortcuts
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
-
-      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
-        e.preventDefault();
-        handleUndo();
-        return;
-      }
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
-        e.preventDefault();
-        handleRedo();
-        return;
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key === 'e') {
-        e.preventDefault();
-        setShowExport(true);
-        return;
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-        e.preventDefault();
-        handleManualSave();
-        return;
-      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) { e.preventDefault(); handleUndo(); return; }
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) { e.preventDefault(); handleRedo(); return; }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'e') { e.preventDefault(); setShowExport(true); return; }
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); handleManualSave(); return; }
       if ((e.ctrlKey || e.metaKey) && e.key === 'g') {
         e.preventDefault();
-        if (e.shiftKey) {
-          canvasHandleRef.current?.ungroupSelected();
-        } else {
-          canvasHandleRef.current?.groupSelected();
-        }
+        if (e.shiftKey) canvasHandleRef.current?.ungroupSelected();
+        else canvasHandleRef.current?.groupSelected();
         return;
       }
       if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
         e.preventDefault();
-        const all = new Set(sceneRef.current.nodes.map(n => n.id));
-        setSelectedNodeIds(all);
+        setSelectedNodeIds(new Set(sceneRef.current.nodes.map(n => n.id)));
         return;
       }
-
       if (e.key === 'Escape') {
-        // First, abort an in-progress stroke
         canvasHandleRef.current?.cancelStroke();
-        // Then exit to parent scene
         const stack = sceneStackRef.current;
-        if (stack.length > 1) {
-          navigateTo(stack.length - 2);
-        } else {
-          setSelectedNodeIds(new Set());
-        }
+        if (stack.length > 1) navigateTo(stack.length - 2);
+        else setSelectedNodeIds(new Set());
         return;
       }
-
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (selectedNodeIds.size > 0) {
-          const current = sceneRef.current;
-          const newScene: Scene = {
-            ...current,
-            nodes: current.nodes.filter(n => !selectedNodeIds.has(n.id)),
-          };
-          setScene(newScene);
-          handleSceneChange(newScene, viewport);
-          setSelectedNodeIds(new Set());
-        }
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNodeIds.size > 0) {
+        const newScene = { ...sceneRef.current, nodes: sceneRef.current.nodes.filter(n => !selectedNodeIds.has(n.id)) };
+        setScene(newScene);
+        handleSceneChange(newScene, viewport);
+        setSelectedNodeIds(new Set());
         return;
       }
-
-      if (e.key === 'v' || e.key === 'V') {
-        if (e.ctrlKey || e.metaKey) return;
-        // Vectorize if a single image node is selected
-        const ids = Array.from(selectedNodeIds);
-        if (ids.length === 1) {
-          const node = sceneRef.current.nodes.find(n => n.id === ids[0]);
-          if (node?.type === 'image' && node.imageData && !node.isVectorized) {
-            canvasHandleRef.current?.vectorizeSelected();
-          }
-        }
-        return;
-      }
-
-      if (e.key === 'z' || e.key === 'Z') {
-        if (e.ctrlKey || e.metaKey) return;
-        canvasHandleRef.current?.enterSelected();
-        return;
-      }
-
       if (!e.ctrlKey && !e.metaKey && !e.altKey) {
         switch (e.key.toLowerCase()) {
           case 'h': setTool('hand'); break;
@@ -375,50 +555,23 @@ export default function App() {
           case 'e': setTool('eraser'); break;
           case 'i': setTool('image'); break;
           case 't': setTool('text'); break;
+          case 'v':
+            if (!e.ctrlKey) {
+              const ids = Array.from(selectedNodeIds);
+              if (ids.length === 1) {
+                const node = sceneRef.current.nodes.find(n => n.id === ids[0]);
+                if (node?.type === 'image' && node.imageData && !node.isVectorized) canvasHandleRef.current?.vectorizeSelected();
+              }
+            }
+            break;
+          case 'z': canvasHandleRef.current?.enterSelected(); break;
+          case 'm': setShowMiniMap(v => !v); break;
         }
       }
     };
-
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [handleUndo, handleRedo, navigateTo, selectedNodeIds, viewport, setScene, handleSceneChange, handleManualSave]);
-
-  // Image import handler
-  const handleImageImport = useCallback((file: File) => {
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const dataUrl = ev.target?.result as string;
-      const img = new Image();
-      img.onload = () => {
-        const maxW = 400;
-        const maxH = 300;
-        let w = img.naturalWidth;
-        let h = img.naturalHeight;
-        if (w > maxW || h > maxH) {
-          const r = Math.min(maxW / w, maxH / h);
-          w = Math.round(w * r);
-          h = Math.round(h * r);
-        }
-        const cx = (window.innerWidth / 2 - viewport.x) / viewport.scale - w / 2;
-        const cy = (window.innerHeight / 2 - viewport.y) / viewport.scale - h / 2;
-        const node = createNode('image', cx, cy, w, h);
-        node.imageData = dataUrl;
-        const newScene = addNode(sceneRef.current, node);
-        setScene(newScene);
-        handleSceneChange(newScene, viewport);
-      };
-      img.src = dataUrl;
-    };
-    reader.readAsDataURL(file);
-    setTool('select');
-  }, [viewport, setScene, handleSceneChange]);
-
-  const handleVectorize = useCallback(() => {
-    canvasHandleRef.current?.vectorizeSelected();
-  }, []);
-
-  const onGroup = useCallback(() => { canvasHandleRef.current?.groupSelected(); }, []);
-  const onUngroup = useCallback(() => { canvasHandleRef.current?.ungroupSelected(); }, []);
 
   const selectedNodes = scene.nodes.filter(n => selectedNodeIds.has(n.id));
   const singleSelection = selectedNodes.length === 1 ? selectedNodes[0] : null;
@@ -426,7 +579,8 @@ export default function App() {
   const hasMultiSelection = selectedNodes.length >= 2;
   const hasSelection = selectedNodes.length >= 1;
   const selectedAreInGroup = selectedNodes.length > 0 && selectedNodes.every(n => !!n.groupId);
-
+  const sceneLayers = ensureLayers(scene);
+  const sceneCatalog = buildSceneCatalog(rootSceneRef.current);
   const zoomPercent = Math.round(viewport.scale * 100);
 
   return (
@@ -449,6 +603,12 @@ export default function App() {
         onSceneChange={handleSceneChange}
         pressureEnabled={pressureEnabled}
         autoEnterEnabled={autoEnterEnabled}
+        symmetry={symmetry}
+        stabilizer={stabilizer}
+        showReference={showReference}
+        activeLayerId={activeLayerId}
+        viewerMode={viewerMode}
+        onHotspotClick={handleNodeClick}
       />
 
       <Toolbar
@@ -461,7 +621,7 @@ export default function App() {
         strokeWidth={strokeWidth}
         setStrokeWidth={setStrokeWidth}
         onImageImport={handleImageImport}
-        onVectorize={handleVectorize}
+        onVectorize={() => canvasHandleRef.current?.vectorizeSelected()}
         canVectorize={canVectorize}
         pressureEnabled={pressureEnabled}
         setPressureEnabled={setPressureEnabled}
@@ -470,116 +630,152 @@ export default function App() {
         hasMultiSelection={hasMultiSelection}
         hasSelection={hasSelection}
         selectedAreInGroup={selectedAreInGroup}
-        onGroup={onGroup}
-        onUngroup={onUngroup}
+        onGroup={() => canvasHandleRef.current?.groupSelected()}
+        onUngroup={() => canvasHandleRef.current?.ungroupSelected()}
+        symmetry={symmetry}
+        setSymmetry={setSymmetry}
+        stabilizer={stabilizer}
+        setStabilizer={setStabilizer}
+        showReference={showReference}
+        setShowReference={setShowReference}
+        showLibrary={showLibrary}
+        setShowLibrary={(b) => setShowLibrary(b)}
+        showLayers={showLayers}
+        setShowLayers={(b) => setShowLayers(b)}
+        showMiniMap={showMiniMap}
+        setShowMiniMap={(b) => setShowMiniMap(b)}
+        onSaveToLibrary={handleSaveToLibrary}
+        onAddCamera={handleAddCamera}
+        hasCameras={(scene.cameras?.length ?? 0) > 0}
+        onPlayTour={handlePlayTour}
+        tourPlaying={tourPlaying}
       />
 
       {/* Top bar */}
-      <div className="fixed top-0 left-14 right-0 h-11 bg-ink/90 backdrop-blur-sm flex items-center px-4 gap-3 z-10">
-        <span className="text-white font-semibold text-sm hidden sm:block" style={{ color: '#4a90d9' }}>
-          ✏ Endless Paper
-        </span>
-
+      <div className="fixed top-0 left-14 right-0 h-11 bg-ink/90 backdrop-blur-sm flex items-center px-4 gap-2 z-10">
+        <span className="text-accent font-semibold text-sm hidden sm:block">✏ Endless Paper</span>
         <div className="w-px h-5 bg-white/20 hidden sm:block" />
 
+        {/* Breadcrumb */}
         <div className="flex items-center gap-1 flex-1 overflow-x-auto scrollbar-none">
           {sceneStack.map((entry, i) => (
             <React.Fragment key={i}>
-              {i > 0 && (
-                <span className="text-gray-500 text-xs flex-shrink-0">›</span>
-              )}
+              {i > 0 && <span className="text-gray-500 text-xs flex-shrink-0">›</span>}
               <button
-                className={`text-xs px-2 py-1 rounded flex-shrink-0 transition-colors ${
-                  i === sceneStack.length - 1
-                    ? 'text-white font-medium'
-                    : 'text-gray-400 hover:text-white hover:bg-white/10'
-                }`}
+                className={`text-xs px-2 py-1 rounded flex-shrink-0 transition-colors ${i === sceneStack.length - 1 ? 'text-white font-medium' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}
                 onClick={() => navigateTo(i)}
                 disabled={i === sceneStack.length - 1}
-              >
-                {entry.label}
-              </button>
+              >{entry.label}</button>
             </React.Fragment>
           ))}
         </div>
 
-        {showSavedFlash && (
-          <span className="text-[10px] text-accent transition-opacity">Saved</span>
+        {showSavedFlash && <span className="text-[10px] text-accent">Saved</span>}
+
+        {/* Start camera */}
+        <button onClick={handleSetStartCamera} title="Set as start point for export" className="px-2 py-1 rounded text-xs text-gray-400 hover:text-white hover:bg-white/10 transition-colors flex-shrink-0">
+          🎯
+        </button>
+        {getRootScene().startCamera && (
+          <button onClick={handleResetToStart} title="Reset to start camera" className="px-2 py-1 rounded text-xs text-gray-400 hover:text-white hover:bg-white/10 transition-colors flex-shrink-0">
+            ⟳
+          </button>
         )}
 
+        {/* Viewer/edit mode toggle */}
         <button
-          className={`p-1.5 rounded transition-colors ${history.canUndo ? 'text-gray-300 hover:text-white hover:bg-white/10' : 'text-gray-600 cursor-not-allowed'}`}
-          onClick={handleUndo}
-          disabled={!history.canUndo}
-          title="Undo (Ctrl+Z)"
+          onClick={() => setViewerMode(v => !v)}
+          className={`px-2 py-1 rounded text-xs font-semibold transition-colors flex-shrink-0 ${viewerMode ? 'bg-accent text-white' : 'text-gray-400 hover:text-white border border-white/10'}`}
+          title="Toggle viewer mode (hotspots active)"
         >
-          <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current">
-            <path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"/>
-          </svg>
-        </button>
-        <button
-          className={`p-1.5 rounded transition-colors ${history.canRedo ? 'text-gray-300 hover:text-white hover:bg-white/10' : 'text-gray-600 cursor-not-allowed'}`}
-          onClick={handleRedo}
-          disabled={!history.canRedo}
-          title="Redo (Ctrl+Y)"
-        >
-          <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current">
-            <path d="M18.4 10.6C16.55 8.99 14.15 8 11.5 8c-4.65 0-8.58 3.03-9.96 7.22L3.9 16c1.05-3.19 4.05-5.5 7.6-5.5 1.95 0 3.73.72 5.12 1.88L13 16h9V7l-3.6 3.6z"/>
-          </svg>
+          {viewerMode ? '▶ View' : '✎ Edit'}
         </button>
 
-        <span className="text-xs font-mono text-accent min-w-[52px] text-right">
-          {zoomPercent}%
-        </span>
+        {/* Audio mute */}
+        <button onClick={() => setAudioMuted(m => !m)} title={audioMuted ? 'Unmute' : 'Mute'} className="p-1.5 rounded text-gray-400 hover:text-white hover:bg-white/10 transition-colors flex-shrink-0">
+          {audioMuted ? '🔇' : '🔊'}
+        </button>
 
-        <button
-          className="px-2 py-1 rounded text-xs text-gray-300 hover:text-white hover:bg-white/10 transition-colors"
-          onClick={handleNew}
-          title="New canvas"
-        >
-          New
+        {/* Properties panel toggle */}
+        {singleSelection && (
+          <button onClick={() => setShowProperties(v => !v)} title="Node properties" className={`p-1.5 rounded text-xs transition-colors flex-shrink-0 ${showProperties ? 'bg-accent text-white' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}>
+            ⚙
+          </button>
+        )}
+
+        {/* Undo / Redo */}
+        <button className={`p-1.5 rounded transition-colors ${history.canUndo ? 'text-gray-300 hover:text-white hover:bg-white/10' : 'text-gray-600 cursor-not-allowed'}`} onClick={handleUndo} disabled={!history.canUndo} title="Undo (Ctrl+Z)">
+          <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current"><path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"/></svg>
         </button>
-        <button
-          className="px-2 py-1 rounded text-xs text-gray-300 hover:text-white hover:bg-white/10 transition-colors"
-          onClick={handleManualSave}
-          title="Save to file (Ctrl+S)"
-        >
-          Save
+        <button className={`p-1.5 rounded transition-colors ${history.canRedo ? 'text-gray-300 hover:text-white hover:bg-white/10' : 'text-gray-600 cursor-not-allowed'}`} onClick={handleRedo} disabled={!history.canRedo} title="Redo (Ctrl+Y)">
+          <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current"><path d="M18.4 10.6C16.55 8.99 14.15 8 11.5 8c-4.65 0-8.58 3.03-9.96 7.22L3.9 16c1.05-3.19 4.05-5.5 7.6-5.5 1.95 0 3.73.72 5.12 1.88L13 16h9V7l-3.6 3.6z"/></svg>
         </button>
-        <button
-          className="px-2 py-1 rounded text-xs text-gray-300 hover:text-white hover:bg-white/10 transition-colors"
-          onClick={handleLoad}
-          title="Load from file"
-        >
-          Load
-        </button>
-        <button
-          className="ml-1 px-3 py-1.5 rounded-lg bg-accent text-white text-xs font-semibold hover:bg-accent/80 transition-colors"
-          onClick={() => setShowExport(true)}
-          title="Export (Ctrl+E)"
-        >
-          Export
-        </button>
+
+        <span className="text-xs font-mono text-accent min-w-[52px] text-right">{zoomPercent}%</span>
+
+        <button onClick={handleNew} className="px-2 py-1 rounded text-xs text-gray-300 hover:text-white hover:bg-white/10 transition-colors">New</button>
+        <button onClick={handleManualSave} title="Ctrl+S" className="px-2 py-1 rounded text-xs text-gray-300 hover:text-white hover:bg-white/10 transition-colors">Save</button>
+        <button onClick={handleLoad} className="px-2 py-1 rounded text-xs text-gray-300 hover:text-white hover:bg-white/10 transition-colors">Load</button>
+        <button onClick={() => setShowExport(true)} title="Ctrl+E" className="ml-1 px-3 py-1.5 rounded-lg bg-accent text-white text-xs font-semibold hover:bg-accent/80 transition-colors">Export</button>
       </div>
 
+      {/* Back button */}
       {sceneStack.length > 1 && (
         <div className="fixed bottom-4 right-4 z-20">
-          <button
-            className="px-3 py-1.5 rounded-lg bg-ink/80 text-white text-xs hover:bg-ink transition-colors backdrop-blur-sm"
-            onClick={() => navigateTo(sceneStack.length - 2)}
-            title="Go back (Escape)"
-          >
+          <button onClick={() => navigateTo(sceneStack.length - 2)} title="Escape" className="px-3 py-1.5 rounded-lg bg-ink/80 text-white text-xs hover:bg-ink transition-colors backdrop-blur-sm">
             ← Back to {sceneStack[sceneStack.length - 2]?.label ?? 'World'}
           </button>
         </div>
       )}
 
-      {showExport && (
-        <ExportModal
-          rootScene={rootSceneRef.current}
-          sceneStack={sceneStack}
-          onClose={() => setShowExport(false)}
+      {/* Right panels */}
+      {showLibrary && (
+        <div className="fixed right-0 top-11 bottom-0 w-56 bg-ink/95 border-l border-white/10 overflow-y-auto z-10 p-3">
+          <AssetLibrary assets={assets} onDelete={handleDeleteAsset} onBeginPlace={handlePlaceAsset} />
+        </div>
+      )}
+
+      {showLayers && !showLibrary && (
+        <div className="fixed right-0 top-11 bottom-0 w-56 bg-ink/95 border-l border-white/10 overflow-y-auto z-10 p-3">
+          <LayersPanel
+            layers={sceneLayers}
+            activeLayerId={activeLayerId}
+            setActiveLayerId={setActiveLayerId}
+            onAddLayer={handleAddLayer}
+            onDeleteLayer={handleDeleteLayer}
+            onUpdateLayer={handleUpdateLayer}
+            onReorderLayer={handleReorderLayer}
+          />
+        </div>
+      )}
+
+      {showProperties && singleSelection && !showLibrary && !showLayers && (
+        <PropertiesPanel
+          node={singleSelection}
+          sceneCatalog={sceneCatalog}
+          onUpdate={handleUpdateSelectedNode}
+          onAddAudio={handleAddAudio}
+          currentSceneAudio={scene.audio}
+          onUpdateSceneAudio={handleUpdateSceneAudio}
         />
+      )}
+
+      {/* Mini-map */}
+      {showMiniMap && (
+        <MiniMap
+          scene={scene}
+          viewport={viewport}
+          canvasWidth={window.innerWidth}
+          canvasHeight={window.innerHeight}
+          onTeleport={handleMiniMapTeleport}
+        />
+      )}
+
+      {/* Hotspot popup */}
+      <PopupDisplay popup={popup} onDismiss={dismissPopup} />
+
+      {showExport && (
+        <ExportModal rootScene={rootSceneRef.current} sceneStack={sceneStack} onClose={() => setShowExport(false)} />
       )}
     </div>
   );

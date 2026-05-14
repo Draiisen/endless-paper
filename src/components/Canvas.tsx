@@ -37,6 +37,12 @@ interface CanvasProps {
   onSceneChange: (scene: Scene, viewport: Viewport) => void;
   pressureEnabled: boolean;
   autoEnterEnabled: boolean;
+  symmetry?: import('../types/scene').SymmetryMode;
+  stabilizer?: number;
+  showReference?: boolean;
+  activeLayerId?: string;
+  viewerMode?: boolean;
+  onHotspotClick?: (node: SceneNode, viewport: Viewport) => boolean;
 }
 
 interface TextEditState {
