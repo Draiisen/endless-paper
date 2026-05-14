@@ -1,9 +1,16 @@
 import { Scene, SceneNode, SceneLevel } from '../types/scene';
 
+// Prevent </script> and <!-- sequences from breaking the inline <script> block.
+function safeJson(value: unknown): string {
+  return JSON.stringify(value)
+    .replace(/<\/script>/gi, '<\\/script>')
+    .replace(/<!--/g, '<\\!--');
+}
+
 export function exportToHTML(rootScene: Scene, _sceneStack: SceneLevel[]): string {
-  const sceneData = JSON.stringify(rootScene);
-  const startCameraData = rootScene.startCamera ? JSON.stringify(rootScene.startCamera.viewport) : 'null';
-  const camerasData = rootScene.cameras && rootScene.cameras.length > 0 ? JSON.stringify(rootScene.cameras) : 'null';
+  const sceneData = safeJson(rootScene);
+  const startCameraData = rootScene.startCamera ? safeJson(rootScene.startCamera.viewport) : 'null';
+  const camerasData = rootScene.cameras && rootScene.cameras.length > 0 ? safeJson(rootScene.cameras) : 'null';
 
   const rendererJS = `
 (function() {
@@ -449,15 +456,26 @@ export function exportToHTML(rootScene: Scene, _sceneStack: SceneLevel[]): strin
 </html>`;
 }
 
+function triggerDownload(url: string, filename: string): void {
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 100);
+}
+
 export function downloadHTML(rootScene: Scene, sceneStack: SceneLevel[]): void {
   const html = exportToHTML(rootScene, sceneStack);
   const blob = new Blob([html], { type: 'text/html' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'endless-paper-export.html';
-  a.click();
-  URL.revokeObjectURL(url);
+  triggerDownload(URL.createObjectURL(blob), 'endless-paper-export.html');
+}
+
+export function downloadJSON(rootScene: Scene): void {
+  const json = JSON.stringify(rootScene, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  triggerDownload(URL.createObjectURL(blob), 'endless-paper.json');
 }
 
 export function serializeScene(scene: Scene): string {

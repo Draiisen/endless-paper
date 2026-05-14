@@ -1,5 +1,5 @@
 import { Scene, SceneLevel } from '../types/scene';
-import { downloadHTML, exportToSVG } from '../utils/export';
+import { downloadHTML, exportToSVG, downloadJSON } from '../utils/export';
 
 interface ExportModalProps {
   rootScene: Scene;
@@ -20,8 +20,10 @@ export function ExportModal({ rootScene, sceneStack, onClose }: ExportModalProps
     const a = document.createElement('a');
     a.href = url;
     a.download = 'endless-paper.svg';
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 100);
     onClose();
   };
 
@@ -86,17 +88,7 @@ export function ExportModal({ rootScene, sceneStack, onClose }: ExportModalProps
           {/* JSON Export */}
           <button
             className="flex items-start gap-4 p-4 rounded-xl border border-white/10 hover:border-white/20 hover:bg-white/5 transition-all text-left group"
-            onClick={() => {
-              const json = JSON.stringify(rootScene, null, 2);
-              const blob = new Blob([json], { type: 'application/json' });
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement('a');
-              a.href = url;
-              a.download = 'endless-paper.json';
-              a.click();
-              URL.revokeObjectURL(url);
-              onClose();
-            }}
+            onClick={() => { downloadJSON(rootScene); onClose(); }}
           >
             <div className="w-10 h-10 rounded-lg bg-white/10 flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform">
               <svg viewBox="0 0 24 24" className="w-5 h-5 fill-white/70">

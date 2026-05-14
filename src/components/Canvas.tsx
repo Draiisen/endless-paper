@@ -10,7 +10,7 @@ import { screenToWorld } from '../engine/transform';
 import { useGestures } from '../hooks/useGestures';
 import { vectorizeImage } from '../engine/vectorizer';
 import { transformPathCoords, parsePathToAnchors, anchorsToPath, PathAnchor } from '../engine/svg-path';
-import { mirroredPaths, mirroredPoints } from '../engine/symmetry';
+import { mirroredPaths, mirroredPoints, symmetryTransforms } from '../engine/symmetry';
 
 /** DFS search for a scene by id in the root scene tree. */
 function findSceneById(root: import('../types/scene').Scene, targetId: string): import('../types/scene').Scene | null {
@@ -96,7 +96,6 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   viewerMode = false,
   onHotspotClick,
 }, ref) {
-  void showReference;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number>(0);
   const needsRenderRef = useRef(true);
@@ -126,6 +125,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   const symmetryRef = useRef(symmetry);
   const stabilizerRef = useRef(stabilizer);
   const viewerModeRef = useRef(viewerMode);
+  const showReferenceRef = useRef(showReference);
   const activeLayerIdRef = useRef(activeLayerId);
   // Symmetry center in world coords — defaults to viewport center
   const symmCenterRef = useRef({ x: 0, y: 0 });
@@ -167,7 +167,8 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   useEffect(() => { autoEnterEnabledRef.current = autoEnterEnabled; }, [autoEnterEnabled]);
   useEffect(() => { symmetryRef.current = symmetry; }, [symmetry]);
   useEffect(() => { stabilizerRef.current = stabilizer; }, [stabilizer]);
-  useEffect(() => { viewerModeRef.current = viewerMode; }, [viewerMode]);
+  useEffect(() => { viewerModeRef.current = viewerMode; needsRenderRef.current = true; }, [viewerMode]);
+  useEffect(() => { showReferenceRef.current = showReference; needsRenderRef.current = true; }, [showReference]);
   useEffect(() => { activeLayerIdRef.current = activeLayerId; }, [activeLayerId]);
 
   // When tool switches to pathedit and single path node is selected, parse anchors
@@ -324,13 +325,23 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
       if (activeLayerIdRef.current) node.layerId = activeLayerIdRef.current;
       let newScene = addNode(sceneRef.current, node);
 
-      // Symmetry: create mirrored path nodes
+      // Symmetry: create mirrored path nodes with correctly transformed bboxes
       if (symm !== 'off') {
         const mirroredDs = mirroredPaths(path.d, symm, cx, cy);
-        for (const d of mirroredDs) {
+        const transforms = symmetryTransforms(symm, cx, cy);
+        for (let mi = 0; mi < mirroredDs.length; mi++) {
+          const d = mirroredDs[mi];
+          const fn = transforms[mi];
+          // Transform the four corners of the original bbox through the symmetry transform
+          const corners = [
+            fn(minX, minY), fn(maxX, minY), fn(minX, maxY), fn(maxX, maxY),
+          ];
+          const mMinX = Math.min(...corners.map(c => c.x));
+          const mMaxX = Math.max(...corners.map(c => c.x));
+          const mMinY = Math.min(...corners.map(c => c.y));
+          const mMaxY = Math.max(...corners.map(c => c.y));
           const mirrorPath: VectorPath = { ...path, id: generateId(), d };
-          // Compute bounds of mirrored path (reuse the same bbox approximation)
-          const mNode = createNode('path', minX - margin, minY - margin, (maxX - minX) + margin * 2, (maxY - minY) + margin * 2);
+          const mNode = createNode('path', mMinX - margin, mMinY - margin, (mMaxX - mMinX) + margin * 2, (mMaxY - mMinY) + margin * 2);
           mNode.path = mirrorPath;
           if (activeLayerIdRef.current) mNode.layerId = activeLayerIdRef.current;
           newScene = addNode(newScene, mNode);
@@ -402,8 +413,8 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
           if (handled) { markDirty(); return; }
         }
 
-        // Check portal navigation
-        if (node.portal?.targetSceneId) {
+        // Check portal navigation — only active in viewer mode
+        if (viewerModeRef.current && node.portal?.targetSceneId) {
           const rootScene = sceneStackRef.current[0]?.scene ?? sceneRef.current;
           const targetScene = findSceneById(rootScene, node.portal.targetSceneId);
           if (targetScene) {
@@ -586,6 +597,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
               : null,
             enterHintNodeId: enterHintNodeIdRef.current,
             viewerMode: viewerModeRef.current,
+            showReference: showReferenceRef.current,
             symmetryCenter: symmMode !== 'off' ? { x: symmCx, y: symmCy } : null,
             pathEditNodeId: pathEditNodeIdRef.current,
             pathEditAnchors: pathAnchorsRef.current.length > 0 ? pathAnchorsRef.current : undefined,

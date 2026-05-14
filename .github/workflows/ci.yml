@@ -12,3 +12,9 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+      - name: Run e2e smoke tests
+        run: npm run test:e2e
+        env:
+          CI: "true"
