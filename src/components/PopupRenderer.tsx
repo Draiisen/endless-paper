@@ -60,8 +60,12 @@ function TextBubble({ popup, onDismiss }: TextBubbleProps) {
         onDismiss();
       }
     };
-    window.addEventListener('mousedown', handler);
-    return () => window.removeEventListener('mousedown', handler);
+    // Delay so the click that opened the popup doesn't immediately dismiss it.
+    const id = setTimeout(() => window.addEventListener('mousedown', handler), 0);
+    return () => {
+      clearTimeout(id);
+      window.removeEventListener('mousedown', handler);
+    };
   }, [onDismiss]);
 
   const style: React.CSSProperties = {

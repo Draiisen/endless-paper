@@ -7,6 +7,16 @@ function safeJson(value: unknown): string {
     .replace(/<!--/g, '<\\!--');
 }
 
+// Escape a value for use inside an SVG attribute (double-quoted).
+function svgAttr(s: string | number | undefined | null): string {
+  if (s === undefined || s === null) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 export function exportToHTML(rootScene: Scene, _sceneStack: SceneLevel[]): string {
   const sceneData = safeJson(rootScene);
   const startCameraData = rootScene.startCamera ? safeJson(rootScene.startCamera.viewport) : 'null';
@@ -25,6 +35,29 @@ export function exportToHTML(rootScene: Scene, _sceneStack: SceneLevel[]): strin
   var sceneStack = [{ scene: sceneData, label: 'World', parentNodeId: null, viewportWhenLeft: { x: 0, y: 0, scale: 1 } }];
   var selectedNode = null;
   var activePopup = null;
+  var hoverPopupNode = null;
+
+  // DFS: find a scene by id anywhere in the tree
+  function findSceneById(scene, id) {
+    if (scene.id === id) return scene;
+    for (var i = 0; i < scene.nodes.length; i++) {
+      if (scene.nodes[i].innerScene) {
+        var found = findSceneById(scene.nodes[i].innerScene, id);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+
+  // Return only nodes on visible layers (or nodes with no layerId)
+  function visibleNodes(scene) {
+    if (!scene.layers || scene.layers.length === 0) return scene.nodes;
+    var visible = {};
+    for (var i = 0; i < scene.layers.length; i++) {
+      if (scene.layers[i].visible !== false) visible[scene.layers[i].id] = true;
+    }
+    return scene.nodes.filter(function(n) { return !n.layerId || visible[n.layerId]; });
+  }
 
   function resize() {
     canvas.width = window.innerWidth;
@@ -66,6 +99,7 @@ export function exportToHTML(rootScene: Scene, _sceneStack: SceneLevel[]): strin
   }
 
   function drawNode(node) {
+    if (node.isReference) return; // tracing overlays hidden in viewer
     ctx.save();
     switch (node.type) {
       case 'path':
@@ -152,7 +186,7 @@ export function exportToHTML(rootScene: Scene, _sceneStack: SceneLevel[]): strin
     for (var x = sx; x <= wr; x += gs) { ctx.beginPath(); ctx.moveTo(x, wt); ctx.lineTo(x, wb); ctx.stroke(); }
     for (var y = sy; y <= wb; y += gs) { ctx.beginPath(); ctx.moveTo(wl, y); ctx.lineTo(wr, y); ctx.stroke(); }
 
-    scene.nodes.forEach(drawNode);
+    visibleNodes(scene).forEach(drawNode);
     ctx.restore();
 
     updateBreadcrumb();
@@ -251,6 +285,19 @@ export function exportToHTML(rootScene: Scene, _sceneStack: SceneLevel[]): strin
         var w = screenToWorld(e.clientX, e.clientY);
         var node = getNodeAt(w.x, w.y);
         if (node) {
+          // Portal navigation
+          if (node.portal && node.portal.targetSceneId) {
+            var target = findSceneById(sceneData, node.portal.targetSceneId);
+            if (target) {
+              sceneStack[sceneStack.length - 1].viewportWhenLeft = JSON.parse(JSON.stringify(viewport));
+              var portalVp = node.portal.targetCamera || { x: canvas.width/2, y: canvas.height/2, scale: 1 };
+              sceneStack.push({ scene: target, label: 'Portal', parentNodeId: node.id, viewportWhenLeft: portalVp });
+              viewport = JSON.parse(JSON.stringify(portalVp));
+              selectedNode = null;
+              render();
+              return;
+            }
+          }
           // Hotspot click handler
           if (node.hotspot && node.hotspot.trigger === 'click') {
             showHotspotPopup(node, e.clientX, e.clientY);
@@ -281,10 +328,23 @@ export function exportToHTML(rootScene: Scene, _sceneStack: SceneLevel[]): strin
       viewport.y += dy;
       render();
     } else if (dragNode && e.buttons === 1) {
-      var w = screenToWorld(e.clientX, e.clientY);
-      dragNode.x = w.x - dragOffset.x;
-      dragNode.y = w.y - dragOffset.y;
+      var ww = screenToWorld(e.clientX, e.clientY);
+      dragNode.x = ww.x - dragOffset.x;
+      dragNode.y = ww.y - dragOffset.y;
       render();
+    } else {
+      // Hover hotspots
+      var hw = screenToWorld(e.clientX, e.clientY);
+      var hoverNode = getNodeAt(hw.x, hw.y);
+      if (hoverNode && hoverNode.hotspot && hoverNode.hotspot.trigger === 'hover') {
+        if (hoverNode !== hoverPopupNode) {
+          hoverPopupNode = hoverNode;
+          showHotspotPopup(hoverNode, e.clientX, e.clientY);
+        }
+      } else if (hoverPopupNode) {
+        hoverPopupNode = null;
+        dismissPopup();
+      }
     }
   });
 
@@ -513,33 +573,35 @@ export async function generateThumbnail(scene: Scene, width = 200, height = 150)
   return canvas.toDataURL('image/png');
 }
 
-// Export scene nodes as SVG
+// Export scene nodes as SVG (attribute values are svgAttr-escaped)
 export function exportToSVG(scene: Scene, width = 800, height = 600): string {
   let svgContent = '';
 
   for (const node of scene.nodes) {
+    if (node.isReference) continue; // skip tracing overlays
     if (node.type === 'path' && node.path) {
       const vp = node.path;
-      svgContent += `<path d="${vp.d}" stroke="${vp.stroke}" stroke-width="${vp.strokeWidth}" fill="${vp.fill}" opacity="${vp.opacity}" stroke-linecap="round" stroke-linejoin="round"/>`;
+      svgContent += `<path d="${svgAttr(vp.d)}" stroke="${svgAttr(vp.stroke)}" stroke-width="${svgAttr(vp.strokeWidth)}" fill="${svgAttr(vp.fill)}" opacity="${svgAttr(vp.opacity)}" stroke-linecap="round" stroke-linejoin="round"/>`;
     } else if (node.type === 'rect') {
-      svgContent += `<rect x="${node.x}" y="${node.y}" width="${node.width}" height="${node.height}" fill="${node.fill || 'none'}" stroke="${node.stroke || 'none'}" stroke-width="${node.strokeWidth || 1}"/>`;
+      svgContent += `<rect x="${node.x}" y="${node.y}" width="${node.width}" height="${node.height}" fill="${svgAttr(node.fill ?? 'none')}" stroke="${svgAttr(node.stroke ?? 'none')}" stroke-width="${node.strokeWidth ?? 1}"/>`;
     } else if (node.type === 'circle') {
       const cx = node.x + node.width / 2;
       const cy = node.y + node.height / 2;
-      svgContent += `<ellipse cx="${cx}" cy="${cy}" rx="${node.width / 2}" ry="${node.height / 2}" fill="${node.fill || 'none'}" stroke="${node.stroke || 'none'}" stroke-width="${node.strokeWidth || 1}"/>`;
+      svgContent += `<ellipse cx="${cx}" cy="${cy}" rx="${node.width / 2}" ry="${node.height / 2}" fill="${svgAttr(node.fill ?? 'none')}" stroke="${svgAttr(node.stroke ?? 'none')}" stroke-width="${node.strokeWidth ?? 1}"/>`;
     } else if (node.type === 'image' && node.isVectorized && node.vectorPaths) {
       for (const vp of node.vectorPaths) {
-        svgContent += `<path d="${vp.d}" stroke="${vp.stroke}" stroke-width="${vp.strokeWidth}" fill="${vp.fill}" opacity="${vp.opacity}"/>`;
+        svgContent += `<path d="${svgAttr(vp.d)}" stroke="${svgAttr(vp.stroke)}" stroke-width="${svgAttr(vp.strokeWidth)}" fill="${svgAttr(vp.fill)}" opacity="${svgAttr(vp.opacity)}"/>`;
       }
     } else if (node.type === 'image' && node.imageData) {
-      svgContent += `<image x="${node.x}" y="${node.y}" width="${node.width}" height="${node.height}" href="${node.imageData}"/>`;
+      // imageData is a data URI; escape & only (no quotes expected in data URIs)
+      svgContent += `<image x="${node.x}" y="${node.y}" width="${node.width}" height="${node.height}" href="${svgAttr(node.imageData)}"/>`;
     } else if (node.type === 'text' && node.text) {
       const fontSize = node.fontSize ?? 16;
       const fontFamily = node.fontFamily ?? 'system-ui, sans-serif';
       const color = node.color ?? '#1a1a2e';
       const lines = node.text.split('\n');
       const lh = fontSize * 1.2;
-      svgContent += `<text x="${node.x}" y="${node.y + fontSize}" font-size="${fontSize}" font-family="${fontFamily.replace(/"/g, '&quot;')}" fill="${color}">`;
+      svgContent += `<text x="${node.x}" y="${node.y + fontSize}" font-size="${fontSize}" font-family="${svgAttr(fontFamily)}" fill="${svgAttr(color)}">`;
       for (let i = 0; i < lines.length; i++) {
         const xml = lines[i].replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         svgContent += `<tspan x="${node.x}" dy="${i === 0 ? 0 : lh}">${xml}</tspan>`;
@@ -550,7 +612,7 @@ export function exportToSVG(scene: Scene, width = 800, height = 600): string {
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
-  <rect width="${width}" height="${height}" fill="${scene.background}"/>
+  <rect width="${width}" height="${height}" fill="${svgAttr(scene.background)}"/>
   ${svgContent}
 </svg>`;
 }

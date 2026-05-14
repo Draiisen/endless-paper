@@ -10,7 +10,8 @@ import { MiniMap } from './components/MiniMap';
 import { PropertiesPanel } from './components/PropertiesPanel';
 import { PopupDisplay, useHotspotHandler } from './components/PopupRenderer';
 import { useHistory } from './hooks/useHistory';
-import { saveToLocalStorage, loadFromLocalStorage, exportToFile, importFromFile, clearLocalStorage, loadSettings, saveSettings, AppSettings } from './engine/persistence';
+import { exportToFile, importFromFile, clearLocalStorage, saveSettings, AppSettings } from './engine/persistence';
+import { saveToIDB } from './engine/idb-store';
 import { audioManager } from './engine/audio-manager';
 
 function makeInitialViewport(): Viewport {
@@ -21,39 +22,37 @@ function createInitialSceneStack(scene: Scene, vp: Viewport): SceneLevel[] {
   return [{ scene, parentNodeId: '', label: 'World', viewportWhenLeft: vp }];
 }
 
-function loadInitial(): { scene: Scene; viewport: Viewport; assets: Asset[]; settings: AppSettings } {
-  const stored = loadFromLocalStorage();
-  const settings = loadSettings();
-  if (stored) {
-    return { scene: stored.rootScene, viewport: stored.viewport, assets: stored.assets ?? [], settings };
-  }
-  return { scene: createScene(), viewport: makeInitialViewport(), assets: [], settings };
+interface AppProps {
+  initialState: PersistedState | null;
+  settings: AppSettings;
 }
 
-const _init = loadInitial();
+export default function App({ initialState, settings }: AppProps) {
+  const initScene = initialState?.rootScene ?? createScene();
+  const initViewport = initialState?.viewport ?? makeInitialViewport();
+  const initAssets = initialState?.assets ?? [];
 
-export default function App() {
   const [tool, setTool] = useState<ToolType>('pen');
   const [strokeColor, setStrokeColor] = useState('#1a1a2e');
   const [fillColor, setFillColor] = useState('none');
   const [strokeWidth, setStrokeWidth] = useState(2);
   const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(new Set());
   const [showExport, setShowExport] = useState(false);
-  const [viewport, setViewport] = useState<Viewport>(_init.viewport);
+  const [viewport, setViewport] = useState<Viewport>(initViewport);
   const [pressureEnabled, setPressureEnabled] = useState(true);
   const [autoEnterEnabled, setAutoEnterEnabled] = useState(true);
   const [showSavedFlash, setShowSavedFlash] = useState(false);
   const [autoSaveFailed, setAutoSaveFailed] = useState(false);
-  const [assets, setAssets] = useState<Asset[]>(_init.assets);
+  const [assets, setAssets] = useState<Asset[]>(initAssets);
   const [showLibrary, setShowLibrary] = useState(false);
   const [showLayers, setShowLayers] = useState(false);
-  const [showMiniMap, setShowMiniMap] = useState(_init.settings.miniMapVisible ?? true);
+  const [showMiniMap, setShowMiniMap] = useState(settings.miniMapVisible ?? true);
   const [showProperties, setShowProperties] = useState(false);
   const [activeLayerId, setActiveLayerId] = useState<string>('');
-  const [symmetry, setSymmetry] = useState<SymmetryMode>(_init.settings.symmetry as SymmetryMode ?? 'off');
-  const [stabilizer, setStabilizer] = useState(_init.settings.stabilizer ?? 0);
-  const [showReference, setShowReference] = useState(_init.settings.showReference ?? true);
-  const [audioMuted, setAudioMuted] = useState(_init.settings.audioMuted ?? false);
+  const [symmetry, setSymmetry] = useState<SymmetryMode>(settings.symmetry ?? 'off');
+  const [stabilizer, setStabilizer] = useState(settings.stabilizer ?? 0);
+  const [showReference, setShowReference] = useState(settings.showReference ?? true);
+  const [audioMuted, setAudioMuted] = useState(settings.audioMuted ?? false);
   const [viewerMode, setViewerMode] = useState(false);
   const [tourPlaying, setTourPlaying] = useState(false);
 
@@ -63,13 +62,13 @@ export default function App() {
   const autoSaveTimerRef = useRef<number | null>(null);
   const canvasHandleRef = useRef<CanvasHandle | null>(null);
 
-  const history = useHistory(_init.scene, _init.viewport);
-  const [scene, setSceneState] = useState<Scene>(_init.scene);
-  const [sceneStack, setSceneStackState] = useState<SceneLevel[]>(createInitialSceneStack(_init.scene, _init.viewport));
+  const history = useHistory(initScene, initViewport);
+  const [scene, setSceneState] = useState<Scene>(initScene);
+  const [sceneStack, setSceneStackState] = useState<SceneLevel[]>(createInitialSceneStack(initScene, initViewport));
 
   const sceneRef = useRef(scene);
   const sceneStackRef = useRef(sceneStack);
-  const rootSceneRef = useRef(_init.scene);
+  const rootSceneRef = useRef(initScene);
   const viewportRef = useRef(viewport);
   const assetsRef = useRef(assets);
 
@@ -134,7 +133,7 @@ export default function App() {
 
   const scheduleAutoSave = useCallback(() => {
     if (autoSaveTimerRef.current !== null) window.clearTimeout(autoSaveTimerRef.current);
-    autoSaveTimerRef.current = window.setTimeout(() => {
+    autoSaveTimerRef.current = window.setTimeout(async () => {
       const state: PersistedState = {
         version: 1,
         rootScene: getRootScene(),
@@ -142,7 +141,7 @@ export default function App() {
         savedAt: Date.now(),
         assets: assetsRef.current,
       };
-      const saved = saveToLocalStorage(state);
+      const saved = await saveToIDB(state);
       if (saved) {
         setAutoSaveFailed(false);
         triggerSavedFlash();
@@ -374,13 +373,33 @@ export default function App() {
     const root = getRootScene();
     if (!root.startCamera) return;
     const { viewport: sv, scenePath } = root.startCamera;
-    // Navigate to root first, then enter scenes along path
-    setScene(root);
-    setViewport(sv);
-    setSceneStack(createInitialSceneStack(root, sv));
     setSelectedNodeIds(new Set());
-    // For now just go to root with saved viewport — deep path traversal is complex
-    void scenePath;
+
+    if (!scenePath || scenePath.length === 0) {
+      setScene(root);
+      setViewport(sv);
+      setSceneStack(createInitialSceneStack(root, sv));
+      return;
+    }
+
+    // Build scene stack by following parentNodeId path from root
+    const newStack: SceneLevel[] = [{ scene: root, parentNodeId: '', label: 'World', viewportWhenLeft: sv }];
+    let current = root;
+    for (const nodeId of scenePath) {
+      const node = current.nodes.find(n => n.id === nodeId);
+      if (!node?.innerScene) break;
+      newStack.push({
+        scene: node.innerScene,
+        parentNodeId: nodeId,
+        label: node.text ?? node.type,
+        viewportWhenLeft: sv,
+      });
+      current = node.innerScene;
+    }
+    const targetScene = newStack[newStack.length - 1].scene;
+    setSceneStack(newStack);
+    setScene(targetScene);
+    setViewport(sv);
   }, [getRootScene, setScene, setSceneStack]);
 
   // Update selected node properties
@@ -561,15 +580,7 @@ export default function App() {
           case 'e': setTool('eraser'); break;
           case 'i': setTool('image'); break;
           case 't': setTool('text'); break;
-          case 'v':
-            if (!e.ctrlKey) {
-              const ids = Array.from(selectedNodeIds);
-              if (ids.length === 1) {
-                const node = sceneRef.current.nodes.find(n => n.id === ids[0]);
-                if (node?.type === 'image' && node.imageData && !node.isVectorized) canvasHandleRef.current?.vectorizeSelected();
-              }
-            }
-            break;
+          case 'v': setTool('select'); break;
           case 'z': canvasHandleRef.current?.enterSelected(); break;
           case 'm': setShowMiniMap(v => !v); break;
         }
@@ -782,7 +793,11 @@ export default function App() {
       <PopupDisplay popup={popup} onDismiss={dismissPopup} />
 
       {showExport && (
-        <ExportModal rootScene={rootSceneRef.current} sceneStack={sceneStack} onClose={() => setShowExport(false)} />
+        <ExportModal
+          state={{ version: 1, rootScene: rootSceneRef.current, viewport: viewportRef.current, savedAt: Date.now(), assets: assetsRef.current }}
+          sceneStack={sceneStack}
+          onClose={() => setShowExport(false)}
+        />
       )}
     </div>
   );

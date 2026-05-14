@@ -41,6 +41,7 @@ export function useGestures(
   callbacks: GestureCallbacks,
   getPressureSensitive: () => boolean = () => false,
   getStabilizer: () => number = () => 0,
+  getViewerMode: () => boolean = () => false,
 ) {
   // Always read latest callbacks via ref so handler identities don't churn.
   const callbacksRef = useRef(callbacks);
@@ -328,6 +329,16 @@ export function useGestures(
     if (tool === 'hand' || isSpaceDown.current) {
       isPanning.current = true;
       callbacksRef.current.onPanStart?.();
+      return;
+    }
+
+    // In viewer mode, all left-clicks route to onSelect regardless of active tool.
+    if (getViewerMode()) {
+      isDragging.current = true;
+      marqueeStartRef.current = { x: world.x, y: world.y };
+      marqueeEndRef.current = { x: world.x, y: world.y };
+      callbacksRef.current.onSelect?.(world.x, world.y, false, e.clientX, e.clientY);
+      callbacksRef.current.onDragStart?.(world.x, world.y);
       return;
     }
 

@@ -1,13 +1,16 @@
-import { Scene, SceneLevel } from '../types/scene';
-import { downloadHTML, exportToSVG, downloadJSON } from '../utils/export';
+import { Scene, SceneLevel, PersistedState } from '../types/scene';
+import { downloadHTML, exportToSVG } from '../utils/export';
+import { exportToFile } from '../engine/persistence';
 
 interface ExportModalProps {
-  rootScene: Scene;
+  state: PersistedState;
   sceneStack: SceneLevel[];
   onClose: () => void;
 }
 
-export function ExportModal({ rootScene, sceneStack, onClose }: ExportModalProps) {
+export function ExportModal({ state, sceneStack, onClose }: ExportModalProps) {
+  const rootScene = state.rootScene;
+
   const handleExportHTML = () => {
     downloadHTML(rootScene, sceneStack);
     onClose();
@@ -88,7 +91,7 @@ export function ExportModal({ rootScene, sceneStack, onClose }: ExportModalProps
           {/* JSON Export */}
           <button
             className="flex items-start gap-4 p-4 rounded-xl border border-white/10 hover:border-white/20 hover:bg-white/5 transition-all text-left group"
-            onClick={() => { downloadJSON(rootScene); onClose(); }}
+            onClick={() => { exportToFile(state); onClose(); }}
           >
             <div className="w-10 h-10 rounded-lg bg-white/10 flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform">
               <svg viewBox="0 0 24 24" className="w-5 h-5 fill-white/70">
@@ -96,8 +99,8 @@ export function ExportModal({ rootScene, sceneStack, onClose }: ExportModalProps
               </svg>
             </div>
             <div>
-              <div className="text-white font-semibold">JSON Data</div>
-              <div className="text-gray-400 text-sm mt-0.5">Raw scene data for backup or re-importing into Endless Paper.</div>
+              <div className="text-white font-semibold">Endless Paper (.endless.json)</div>
+              <div className="text-gray-400 text-sm mt-0.5">Full project backup — scenes, assets, viewport. Re-import into Endless Paper.</div>
             </div>
           </button>
         </div>

@@ -73,8 +73,14 @@ export function importFromFile(): Promise<PersistedState> {
       const reader = new FileReader();
       reader.onload = () => {
         try {
-          const parsed = JSON.parse(String(reader.result)) as PersistedState;
-          if (!parsed || parsed.version !== 1 || !parsed.rootScene) {
+          const raw = JSON.parse(String(reader.result));
+          let parsed: PersistedState;
+          if (raw && raw.version === 1 && raw.rootScene) {
+            parsed = raw as PersistedState;
+          } else if (raw && raw.id && Array.isArray(raw.nodes)) {
+            // Legacy export: plain Scene object — wrap it
+            parsed = { version: 1, rootScene: raw, viewport: { x: 400, y: 300, scale: 1 }, savedAt: 0 };
+          } else {
             throw new Error('Invalid file format');
           }
           settled = true;

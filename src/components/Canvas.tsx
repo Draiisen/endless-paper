@@ -296,6 +296,9 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
       const w = canvas?.width ?? window.innerWidth;
       const h = canvas?.height ?? window.innerHeight;
       const innerVp = { x: w / 2, y: h / 2, scale: 1 };
+      // Prevent auto-exit from firing on the scale drop caused by this programmatic reset.
+      lastAutoExitTimeRef.current = Date.now();
+      prevScaleRef.current = 1;
       setSceneStack(newStack);
       setScene(updatedNode.innerScene!);
       setViewport(innerVp);
@@ -564,6 +567,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
     gestureCallbacks,
     () => pressureEnabledRef.current,
     () => stabilizerRef.current,
+    () => viewerModeRef.current,
   );
   gesturesApiRef.current = gestures;
   const { handlers, getLivePoints, getShapeStart, getShapeEnd, getMarqueeStart, getMarqueeEnd, setSpaceDown, cancelStroke } = gestures;
