@@ -42,7 +42,14 @@ export async function loadFromIDB(): Promise<PersistedState | null> {
       req.onsuccess = () => resolve(req.result as PersistedState | undefined);
       req.onerror = () => reject(req.error);
     });
-    if (!result || result.version !== 1 || !result.rootScene) return null;
+    if (!result || !result.rootScene) return null;
+    if (result.version !== 1) {
+      console.warn(
+        `[Endless Paper] Unrecognized save format version ${(result as any).version}.` +
+        ' Load skipped to avoid corruption. Export your project first, then clear the autosave.'
+      );
+      return null;
+    }
     return result;
   } catch {
     return null;

@@ -57,6 +57,7 @@ export default function App({ initialState, settings }: AppProps) {
   const [viewerMode, setViewerMode] = useState(false);
   const [tourPlaying, setTourPlaying] = useState(false);
   const [showSaves, setShowSaves] = useState(false);
+  const [projectSizeMB, setProjectSizeMB] = useState(0);
 
   const { popup, handleNodeClick, dismiss: dismissPopup } = useHotspotHandler(viewerMode);
 
@@ -143,6 +144,9 @@ export default function App({ initialState, settings }: AppProps) {
         savedAt: Date.now(),
         assets: assetsRef.current,
       };
+      // Measure serialized size for the warning badge (one stringify, debounced)
+      const approxBytes = JSON.stringify(state).length;
+      setProjectSizeMB(approxBytes / 1_048_576);
       const saved = await saveToIDB(state);
       if (saved) {
         setAutoSaveFailed(false);
@@ -704,6 +708,8 @@ export default function App({ initialState, settings }: AppProps) {
           ))}
         </div>
 
+        {projectSizeMB > 15 && <span className="text-[10px] text-orange-400 flex-shrink-0" title="Project is large — export a backup">⚠ {projectSizeMB.toFixed(0)} MB</span>}
+        {projectSizeMB > 5 && projectSizeMB <= 15 && <span className="text-[10px] text-yellow-400/80 flex-shrink-0">{projectSizeMB.toFixed(1)} MB</span>}
         {autoSaveFailed && <span className="text-[10px] text-red-400">Auto-save failed: canvas too large. Use File &gt; Save to export.</span>}
         {showSavedFlash && !autoSaveFailed && <span className="text-[10px] text-accent">Saved</span>}
 

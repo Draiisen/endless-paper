@@ -452,6 +452,58 @@ test('asset library — assets persist in IDB after reload', async ({ page }) =>
   expect(await getIDBAssetCount(page)).toBe(1);
 });
 
+test('ExportModal — HTML download is a valid interactive viewer', async ({ page }) => {
+  await seedLocalStorage(page);
+  await page.goto('/');
+  await waitForCanvas(page);
+
+  // Open export modal via keyboard shortcut
+  await page.keyboard.press('Control+e');
+  await page.waitForSelector('text=Interactive HTML', { timeout: 3000 });
+
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    page.getByText('Interactive HTML').click(),
+  ]);
+
+  const filePath = await download.path();
+  expect(filePath).not.toBeNull();
+  const content = readFileSync(filePath!, 'utf8');
+
+  expect(content).toContain('<!DOCTYPE html>');
+  expect(content).toContain('Endless Paper');
+  // The seeded scene ID and node ID must be embedded in the JS data blob
+  expect(content).toContain('root-scene');
+  expect(content).toContain('hotspot-node');
+  // Must have a <canvas> element (the viewer renders onto it)
+  expect(content).toContain('<canvas');
+});
+
+test('ExportModal — SVG download is valid and contains seeded node fill', async ({ page }) => {
+  await seedLocalStorage(page);
+  await page.goto('/');
+  await waitForCanvas(page);
+
+  await page.keyboard.press('Control+e');
+  await page.waitForSelector('text=SVG Vector', { timeout: 3000 });
+
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    page.getByText('SVG Vector').click(),
+  ]);
+
+  const filePath = await download.path();
+  expect(filePath).not.toBeNull();
+  const content = readFileSync(filePath!, 'utf8');
+
+  expect(content).toContain('<svg');
+  expect(content).toContain('xmlns="http://www.w3.org/2000/svg"');
+  // hotspot-node is a rect with fill="#4a90d9" — must appear in the output
+  expect(content).toContain('#4a90d9');
+  // portal-node has fill="#e74c3c"
+  expect(content).toContain('#e74c3c');
+});
+
 test('layer lock / visibility — locked-layer node cannot be selected', async ({ page }) => {
   await seedLocalStorage(page);
   await page.goto('/');
