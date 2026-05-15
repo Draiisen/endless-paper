@@ -82,7 +82,7 @@ export default function App({ initialState, settings }: AppProps) {
   const [projectSizeMB, setProjectSizeMB] = useState(0);
   const [lodProcessingCount, setLodProcessingCount] = useState(0);
   const [shareFlash, setShareFlash] = useState<'copied' | 'toobig' | null>(null);
-  const [toolbarCollapsed, setToolbarCollapsed] = useState(() => window.innerWidth < 640);
+  const [toolbarCollapsed, setToolbarCollapsed] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [showWelcome, setShowWelcome] = useState(() => !localStorage.getItem('ep_welcomed_v1'));
   const [showHelp, setShowHelp] = useState(false);

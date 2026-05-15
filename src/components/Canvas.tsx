@@ -116,6 +116,8 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   const [isVectorizing, setIsVectorizing] = useState(false);
   const [textEdit, setTextEdit] = useState<TextEditState | null>(null);
   const textCommittedRef = useRef(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const textEditContainerRef = useRef<HTMLDivElement>(null);
   const resizeStateRef = useRef<{
     handleIdx: number; nodeId: string;
     origX: number; origY: number; origW: number; origH: number;
@@ -189,6 +191,14 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   useEffect(() => { viewerModeRef.current = viewerMode; needsRenderRef.current = true; }, [viewerMode]);
   useEffect(() => { showReferenceRef.current = showReference; needsRenderRef.current = true; }, [showReference]);
   useEffect(() => { activeLayerIdRef.current = activeLayerId; }, [activeLayerId]);
+
+  // Explicitly focus the textarea when a text edit session opens (autoFocus alone fails on iOS)
+  const textEditKey = textEdit ? `${textEdit.worldX.toFixed(0)}-${textEdit.worldY.toFixed(0)}` : null;
+  useEffect(() => {
+    if (!textEditKey) return;
+    const raf = requestAnimationFrame(() => textareaRef.current?.focus());
+    return () => cancelAnimationFrame(raf);
+  }, [textEditKey]);
 
   // When tool switches to pathedit and single path node is selected, parse anchors
   useEffect(() => {
@@ -1117,11 +1127,15 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
 
       {textEdit && (
         <div
+          ref={textEditContainerRef}
           className="fixed z-40 flex flex-col gap-1"
-          style={{ left: textEdit.screenX, top: Math.max(56, textEdit.screenY - 36) }}
+          style={{
+            left: Math.min(textEdit.screenX, window.innerWidth - 240),
+            top: Math.max(56, textEdit.screenY - 44),
+          }}
         >
-          {/* Font size picker */}
-          <div className="flex gap-1 bg-ink/90 rounded-lg px-2 py-1 shadow-lg border border-white/10 self-start">
+          {/* Toolbar: font sizes + Done + Cancel */}
+          <div className="flex items-center gap-1 bg-ink/90 rounded-lg px-2 py-1 shadow-lg border border-white/10 self-start">
             {[12, 18, 24, 36, 48, 64].map(s => (
               <button
                 key={s}
@@ -1129,16 +1143,28 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
                 onPointerDown={e => { e.preventDefault(); setTextEdit(t => t ? { ...t, fontSize: s } : t); }}
               >{s}</button>
             ))}
+            <div className="w-px h-4 bg-white/20 mx-0.5 flex-shrink-0" />
+            <button
+              className="px-2 py-0.5 rounded bg-accent text-white text-[11px] font-bold touch-manipulation flex-shrink-0"
+              onPointerDown={e => { e.preventDefault(); commitTextEdit(); }}
+              title="Valider (Entrée)"
+            >✓</button>
+            <button
+              className="px-1.5 py-0.5 rounded text-gray-400 hover:text-white text-[11px] touch-manipulation flex-shrink-0"
+              onPointerDown={e => { e.preventDefault(); setTextEdit(null); setTool('select'); }}
+              title="Annuler (Échap)"
+            >✕</button>
           </div>
           <textarea
-            autoFocus
+            ref={textareaRef}
             className="resize-none bg-white/95 border-2 border-accent rounded shadow-lg px-2 py-1 outline-none"
             style={{
               fontSize: `${textEdit.fontSize}px`,
               fontFamily: 'system-ui, sans-serif',
               color: strokeColor,
-              minWidth: 80,
-              minHeight: 24,
+              minWidth: 120,
+              minHeight: 36,
+              maxWidth: window.innerWidth - 48,
             }}
             value={textEdit.value}
             onChange={(e) => setTextEdit({ ...textEdit, value: e.target.value })}
@@ -1152,7 +1178,15 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
                 commitTextEdit();
               }
             }}
-            onBlur={commitTextEdit}
+            onBlur={() => {
+              // Delay so focus can move within the container (e.g. font size buttons)
+              // without triggering a premature commit. Also protects against mobile
+              // keyboard-open events that briefly fire blur.
+              setTimeout(() => {
+                if (textEditContainerRef.current?.contains(document.activeElement)) return;
+                if (!textCommittedRef.current) commitTextEdit();
+              }, 250);
+            }}
           />
         </div>
       )}
