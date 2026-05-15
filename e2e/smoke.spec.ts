@@ -71,6 +71,7 @@ const SEED_STATE = {
 function seedLocalStorage(page: Page) {
   return page.addInitScript((state) => {
     localStorage.setItem('endless-paper-autosave', JSON.stringify(state));
+    localStorage.setItem('ep_welcomed_v1', '1');
   }, SEED_STATE);
 }
 
@@ -104,6 +105,13 @@ async function drawStroke(page: Page, x1: number, y1: number, x2: number, y2: nu
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
+
+// Suppress the WelcomeModal for all tests (it would block interactions)
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('ep_welcomed_v1', '1');
+  });
+});
 
 test('draw stroke — new stroke is persisted to IDB on autosave', async ({ page }) => {
   await seedLocalStorage(page);
