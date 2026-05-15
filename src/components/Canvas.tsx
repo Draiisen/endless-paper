@@ -158,6 +158,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   const pathEditNodeIdRef = useRef<string | null>(null);
   const dragAnchorIdxRef = useRef<number | null>(null);
   const dragAnchorPartRef = useRef<'anchor' | 'in' | 'out'>('anchor');
+  const selectedAnchorIdxRef = useRef<number | null>(null);
 
   // Portal flash state
   const isPortalingRef = useRef(false);
@@ -209,6 +210,8 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
         if (node?.type === 'path' && node.path) {
           pathAnchorsRef.current = parsePathToAnchors(node.path.d);
           pathEditNodeIdRef.current = node.id;
+          dragAnchorIdxRef.current = null;
+          selectedAnchorIdxRef.current = null;
           needsRenderRef.current = true;
           return;
         }
@@ -233,6 +236,8 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
       }
       pathAnchorsRef.current = [];
       pathEditNodeIdRef.current = null;
+      dragAnchorIdxRef.current = null;
+      selectedAnchorIdxRef.current = null;
       needsRenderRef.current = true;
     }
   }, [tool, selectedNodeIds, setScene, onSceneChange]);
@@ -437,25 +442,31 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
     onShapeMove: useCallback(() => { markDirty(); }, [markDirty]),
 
     onSelect: useCallback((worldX: number, worldY: number, additive: boolean) => {
-      // Pathedit: hit-test anchors and handles before anything else
+      // Pathedit: hit-test handles then anchors (handles are on top visually)
       if (toolRef.current === 'pathedit' && pathAnchorsRef.current.length > 0) {
-        const hitR = Math.max(6, 8 / viewportRef.current.scale);
+        const hitR = Math.max(7, 9 / viewportRef.current.scale);
         const anchors = pathAnchorsRef.current;
         for (let i = 0; i < anchors.length; i++) {
           const a = anchors[i];
           if (a.inX !== undefined && a.inY !== undefined &&
               Math.hypot(worldX - a.inX, worldY - a.inY) <= hitR) {
-            dragAnchorIdxRef.current = i; dragAnchorPartRef.current = 'in'; return;
+            dragAnchorIdxRef.current = i; dragAnchorPartRef.current = 'in';
+            selectedAnchorIdxRef.current = i; needsRenderRef.current = true; return;
           }
           if (a.outX !== undefined && a.outY !== undefined &&
               Math.hypot(worldX - a.outX, worldY - a.outY) <= hitR) {
-            dragAnchorIdxRef.current = i; dragAnchorPartRef.current = 'out'; return;
-          }
-          if (Math.abs(worldX - a.x) <= hitR && Math.abs(worldY - a.y) <= hitR) {
-            dragAnchorIdxRef.current = i; dragAnchorPartRef.current = 'anchor'; return;
+            dragAnchorIdxRef.current = i; dragAnchorPartRef.current = 'out';
+            selectedAnchorIdxRef.current = i; needsRenderRef.current = true; return;
           }
         }
-        // Clicked empty space in pathedit — clear anchor drag state but don't deselect
+        for (let i = 0; i < anchors.length; i++) {
+          const a = anchors[i];
+          if (Math.hypot(worldX - a.x, worldY - a.y) <= hitR) {
+            dragAnchorIdxRef.current = i; dragAnchorPartRef.current = 'anchor';
+            selectedAnchorIdxRef.current = i; needsRenderRef.current = true; return;
+          }
+        }
+        // Clicked empty space in pathedit — clear drag state but don't deselect
         dragAnchorIdxRef.current = null;
         return;
       }
@@ -567,8 +578,30 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
           if (hdxo !== undefined) { a.outX = a.x + hdxo; a.outY = a.y + (hdyo ?? 0); }
         } else if (part === 'in') {
           a.inX = (a.inX ?? a.x) + dx; a.inY = (a.inY ?? a.y) + dy;
+          // Mirror out handle to maintain smooth curve (Shift = break symmetry)
+          if (!shiftKeyRef.current && a.outX !== undefined && a.outY !== undefined) {
+            const odx = a.outX - a.x; const ody = a.outY - a.y;
+            const outLen = Math.hypot(odx, ody);
+            const mirDx = a.x - a.inX; const mirDy = a.y - a.inY;
+            const mirLen = Math.hypot(mirDx, mirDy);
+            if (mirLen > 0 && outLen > 0) {
+              a.outX = a.x + (mirDx / mirLen) * outLen;
+              a.outY = a.y + (mirDy / mirLen) * outLen;
+            }
+          }
         } else {
           a.outX = (a.outX ?? a.x) + dx; a.outY = (a.outY ?? a.y) + dy;
+          // Mirror in handle to maintain smooth curve (Shift = break symmetry)
+          if (!shiftKeyRef.current && a.inX !== undefined && a.inY !== undefined) {
+            const idx2 = a.inX - a.x; const idy = a.inY - a.y;
+            const inLen = Math.hypot(idx2, idy);
+            const mirDx = a.x - a.outX; const mirDy = a.y - a.outY;
+            const mirLen = Math.hypot(mirDx, mirDy);
+            if (mirLen > 0 && inLen > 0) {
+              a.inX = a.x + (mirDx / mirLen) * inLen;
+              a.inY = a.y + (mirDy / mirLen) * inLen;
+            }
+          }
         }
         pathAnchorsRef.current = anchors;
         markDirty();
@@ -791,6 +824,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
             symmetryCenter: symmMode !== 'off' ? { x: symmCx, y: symmCy } : null,
             pathEditNodeId: pathEditNodeIdRef.current,
             pathEditAnchors: pathAnchorsRef.current.length > 0 ? pathAnchorsRef.current : undefined,
+            pathEditSelectedAnchorIdx: selectedAnchorIdxRef.current,
             animationTime: Date.now(),
             startCameraPin,
           });
@@ -864,6 +898,36 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
         setSpaceDown(true);
       }
       if (e.key === 'Shift') shiftKeyRef.current = true;
+
+      // Delete selected anchor in pathedit mode
+      if ((e.key === 'Delete' || e.key === 'Backspace') &&
+          toolRef.current === 'pathedit' &&
+          selectedAnchorIdxRef.current !== null &&
+          !(e.target instanceof HTMLInputElement) && !(e.target instanceof HTMLTextAreaElement)) {
+        e.preventDefault();
+        const idx = selectedAnchorIdxRef.current;
+        const anchors = [...pathAnchorsRef.current];
+        if (anchors.length > 1) {
+          anchors.splice(idx, 1);
+          pathAnchorsRef.current = anchors;
+          selectedAnchorIdxRef.current = Math.min(idx, anchors.length - 1);
+          dragAnchorIdxRef.current = null;
+          needsRenderRef.current = true;
+          // Commit immediately
+          const nodeId = pathEditNodeIdRef.current;
+          if (nodeId) {
+            const d = anchorsToPath(anchors);
+            if (d) {
+              const node = sceneRef.current.nodes.find(n => n.id === nodeId);
+              if (node?.path) {
+                const newScene = updateNode(sceneRef.current, nodeId, { path: { ...node.path, d } });
+                setScene(newScene);
+                onSceneChange(newScene, viewportRef.current);
+              }
+            }
+          }
+        }
+      }
     };
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.code === 'Space') setSpaceDown(false);
@@ -875,7 +939,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
     };
-  }, [setSpaceDown]);
+  }, [setSpaceDown, setScene, onSceneChange]);
 
   // Track previous viewport scale to detect "zooming in"
   const prevScaleRef = useRef(viewport.scale);
@@ -1177,6 +1241,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
       case 'eraser': return 'cell';
       case 'select': return 'default';
       case 'text': return 'text';
+      case 'pathedit': return 'crosshair';
       default: return 'crosshair';
     }
   };

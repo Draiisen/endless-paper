@@ -30,6 +30,7 @@ export interface RenderOptions {
   // For path edit mode
   pathEditNodeId?: string | null;
   pathEditAnchors?: { x: number; y: number; inX?: number; inY?: number; outX?: number; outY?: number; moveTo?: boolean }[];
+  pathEditSelectedAnchorIdx?: number | null;
   // Animation time tick (ms). When > 0 the renderer applies focus animations.
   animationTime?: number;
   // Marks viewer (presentation) mode — hides editor chrome (enter hints, hotspot badges, portal markers, etc are drawn differently)
@@ -53,7 +54,7 @@ export function renderScene(
   viewport: Viewport,
   options: RenderOptions = {}
 ): void {
-  const { highlightSelected, showGrid = true, selectionRect, enterHintNodeId, showReference = true, startCameraPin, symmetryCenter, pathEditNodeId, pathEditAnchors, animationTime = 0, viewerMode = false } = options;
+  const { highlightSelected, showGrid = true, selectionRect, enterHintNodeId, showReference = true, startCameraPin, symmetryCenter, pathEditNodeId, pathEditAnchors, pathEditSelectedAnchorIdx, animationTime = 0, viewerMode = false } = options;
   const canvas = ctx.canvas;
   const { width, height } = canvas;
 
@@ -154,7 +155,7 @@ export function renderScene(
 
   // Bezier path edit overlay
   if (pathEditNodeId && pathEditAnchors && pathEditAnchors.length > 0) {
-    drawPathEditAnchors(ctx, pathEditAnchors, viewport.scale);
+    drawPathEditAnchors(ctx, pathEditAnchors, viewport.scale, pathEditSelectedAnchorIdx ?? null);
   }
 
   ctx.restore();
@@ -226,29 +227,37 @@ function drawPathEditAnchors(
   ctx: CanvasRenderingContext2D,
   anchors: { x: number; y: number; inX?: number; inY?: number; outX?: number; outY?: number; moveTo?: boolean }[],
   scale: number,
+  selectedIdx: number | null,
 ): void {
   ctx.save();
-  const handleR = 4 / scale;
+  const handleR = 4.5 / scale;
   const anchorR = 5 / scale;
-  ctx.lineWidth = 1 / scale;
+  ctx.lineWidth = 1.5 / scale;
 
-  // Handles first
-  ctx.strokeStyle = 'rgba(74, 144, 217, 0.6)';
-  for (const a of anchors) {
+  // Handle lines + circles
+  for (let i = 0; i < anchors.length; i++) {
+    const a = anchors[i];
+    const isSel = i === selectedIdx;
+    ctx.strokeStyle = isSel ? 'rgba(74,144,217,0.9)' : 'rgba(74,144,217,0.5)';
     if (a.inX !== undefined && a.inY !== undefined) {
       ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(a.inX, a.inY); ctx.stroke();
-      ctx.beginPath(); ctx.arc(a.inX, a.inY, handleR, 0, Math.PI * 2); ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.arc(a.inX, a.inY, handleR, 0, Math.PI * 2);
+      ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.stroke();
     }
     if (a.outX !== undefined && a.outY !== undefined) {
       ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(a.outX, a.outY); ctx.stroke();
-      ctx.beginPath(); ctx.arc(a.outX, a.outY, handleR, 0, Math.PI * 2); ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.arc(a.outX, a.outY, handleR, 0, Math.PI * 2);
+      ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.stroke();
     }
   }
 
-  // Anchors
-  ctx.strokeStyle = '#4a90d9';
-  ctx.fillStyle = '#ffffff';
-  for (const a of anchors) {
+  // Anchor squares — selected anchor filled accent, others white
+  ctx.lineWidth = 1.5 / scale;
+  for (let i = 0; i < anchors.length; i++) {
+    const a = anchors[i];
+    const isSel = i === selectedIdx;
+    ctx.strokeStyle = '#4a90d9';
+    ctx.fillStyle = isSel ? '#4a90d9' : '#ffffff';
     ctx.fillRect(a.x - anchorR, a.y - anchorR, anchorR * 2, anchorR * 2);
     ctx.strokeRect(a.x - anchorR, a.y - anchorR, anchorR * 2, anchorR * 2);
   }

@@ -362,7 +362,7 @@ export function useGestures(
       return;
     }
 
-    if (tool === 'select') {
+    if (tool === 'select' || tool === 'pathedit') {
       // Set drag/marquee state BEFORE invoking the select callback so that the
       // callback (which may call beginMarquee) sees the right state.
       isDragging.current = true;
