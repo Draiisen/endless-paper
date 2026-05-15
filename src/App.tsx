@@ -248,7 +248,7 @@ export default function App({ initialState, settings }: AppProps) {
       scene: {
         ...entry.scene,
         nodes: entry.scene.nodes.map(n => n.id === nodeId
-          ? { ...n, lod: { ...(n.lod ?? {}), colorLayers: lod.colorLayers, sourceW: lod.sourceW, sourceH: lod.sourceH } }
+          ? { ...n, lod: { ...(n.lod ?? {}), colorLayers: lod.colorLayers, sourceW: lod.sourceW, sourceH: lod.sourceH, vectorLoadedAt: Date.now() } }
           : n),
       },
     });
@@ -1131,7 +1131,7 @@ export default function App({ initialState, settings }: AppProps) {
 
       {/* Back button */}
       {sceneStack.length > 1 && (
-        <div className="fixed bottom-4 right-4 z-20">
+        <div className="fixed right-4 z-20" style={{ bottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))' }}>
           <button onClick={() => navigateTo(sceneStack.length - 2)} title="Escape" className="px-3 py-1.5 rounded-lg bg-ink/80 text-white text-xs hover:bg-ink transition-colors backdrop-blur-sm">
             ← Back to {sceneStack[sceneStack.length - 2]?.label ?? 'World'}
           </button>
@@ -1186,7 +1186,7 @@ export default function App({ initialState, settings }: AppProps) {
 
       {/* Unified selection action bar */}
       {hasSelection && !viewerMode && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-0.5 px-2 py-1.5 bg-ink/95 backdrop-blur-sm border border-white/10 rounded-2xl shadow-xl">
+        <div className="fixed left-1/2 -translate-x-1/2 z-20 flex items-center gap-0.5 px-2 py-1.5 bg-ink/95 backdrop-blur-sm border border-white/10 rounded-2xl shadow-xl" style={{ bottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))' }}>
           {/* Fill color — shapes & paths */}
           {selHasShapes && (
             <label className="flex items-center gap-1 px-1.5 cursor-pointer" title="Remplissage">
@@ -1221,19 +1221,19 @@ export default function App({ initialState, settings }: AppProps) {
           <div className="w-px h-5 bg-white/15 mx-0.5" />
           {/* Duplicate */}
           <button onClick={handleDuplicate}
-            className="w-9 h-9 flex items-center justify-center rounded-xl text-gray-400 active:text-white active:bg-white/10 touch-manipulation transition-colors text-base"
+            className="w-11 h-11 flex items-center justify-center rounded-xl text-gray-400 active:text-white active:bg-white/10 touch-manipulation transition-colors text-base"
             title="Dupliquer (⌘D)">
             <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
           </button>
           {/* Properties — single only */}
           {singleSelection && (
             <button onClick={() => setShowProperties(v => !v)}
-              className={`w-9 h-9 flex items-center justify-center rounded-xl touch-manipulation transition-colors text-sm ${showProperties ? 'bg-accent/20 text-accent' : 'text-gray-400 active:text-white active:bg-white/10'}`}
+              className={`w-11 h-11 flex items-center justify-center rounded-xl touch-manipulation transition-colors text-sm ${showProperties ? 'bg-accent/20 text-accent' : 'text-gray-400 active:text-white active:bg-white/10'}`}
               title="Propriétés">⚙</button>
           )}
           {/* Delete */}
           <button onClick={handleDeleteSelected}
-            className="w-9 h-9 flex items-center justify-center rounded-xl text-red-400/70 active:text-red-300 active:bg-red-400/10 touch-manipulation transition-colors text-base"
+            className="w-11 h-11 flex items-center justify-center rounded-xl text-red-400/70 active:text-red-300 active:bg-red-400/10 touch-manipulation transition-colors text-base"
             title="Supprimer (Delete)">✕</button>
         </div>
       )}

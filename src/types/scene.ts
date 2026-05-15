@@ -185,6 +185,7 @@ export interface ImageLOD {
   sourceH: number;              // pixel height used for tracing
   naturalW?: number;            // original image natural width   (for LOD threshold)
   naturalH?: number;            // original image natural height
+  vectorLoadedAt?: number;      // timestamp (ms) when color vectors finished loading
 }
 
 export interface BrushStamp {

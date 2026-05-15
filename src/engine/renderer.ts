@@ -610,7 +610,12 @@ function drawImageLOD(ctx: CanvasRenderingContext2D, node: SceneNode, viewportSc
   const hasVectors = !!(lod?.colorLayers && lod.colorLayers.length > 0 &&
     lod.sourceW > 0 && lod.sourceH > 0 && nw > 0);
   const ratio = hasVectors ? (nw / node.width) * viewportScale : 0;
-  const vectorAlpha = hasVectors ? Math.min(1, Math.max(0, (ratio - 0.8) / 0.8)) : 0;
+  let vectorAlpha = hasVectors ? Math.min(1, Math.max(0, (ratio - 0.8) / 0.8)) : 0;
+
+  // Fade-in when vectors just finished loading (600 ms transition)
+  if (vectorAlpha > 0 && lod?.vectorLoadedAt) {
+    vectorAlpha *= Math.min(1, (Date.now() - lod.vectorLoadedAt) / 600);
+  }
 
   // ── Legacy monochrome vectorization ──────────────────────────────────────
   if (!hasVectors && node.isVectorized && node.vectorPaths && node.vectorPaths.length > 0) {
@@ -619,9 +624,12 @@ function drawImageLOD(ctx: CanvasRenderingContext2D, node: SceneNode, viewportSc
     return;
   }
 
-  // ── Raster base layer (always drawn while blending, skipped when fully vector)
-  if (vectorAlpha < 1 && node.imageData) {
+  // ── Raster base layer — keeps 5% minimum opacity to fill vector coverage gaps (no white holes)
+  if (node.imageData) {
+    const outerAlpha = ctx.globalAlpha;
+    ctx.globalAlpha = outerAlpha * Math.max(0.05, 1 - vectorAlpha);
     drawImage(ctx, node);
+    ctx.globalAlpha = outerAlpha;
   }
 
   // ── Vector layer fades in over the raster as zoom increases ───────────────

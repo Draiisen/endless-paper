@@ -797,7 +797,9 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
       const liveShapeActive = !!(ss && se && (toolRef.current === 'rect' || toolRef.current === 'circle'));
 
       const hasAnimatedNodes = sceneRef.current.nodes.some(n => n.animation);
-      if (needsRenderRef.current || liveStrokeActive || liveShapeActive || (ms && me) || hasAnimatedNodes) {
+      const now = Date.now();
+      const hasVectorFading = sceneRef.current.nodes.some(n => n.lod?.vectorLoadedAt && (now - n.lod.vectorLoadedAt) < 650);
+      if (needsRenderRef.current || liveStrokeActive || liveShapeActive || (ms && me) || hasAnimatedNodes || hasVectorFading) {
         const ctx = canvas.getContext('2d');
         if (ctx) {
           const symmMode = symmetryRef.current;
