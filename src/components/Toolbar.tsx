@@ -88,7 +88,7 @@ export function Toolbar({
 
   if (collapsed) {
     return (
-      <div className="fixed left-0 top-0 bottom-0 w-9 bg-ink z-20 flex flex-col items-center pt-2 gap-2 select-none">
+      <div className="hidden sm:flex fixed left-0 top-0 bottom-0 w-9 bg-ink z-20 flex-col items-center pt-2 gap-2 select-none">
         <button
           onClick={onToggleCollapsed}
           className="w-9 h-11 flex items-center justify-center text-gray-400 hover:text-white active:text-white touch-manipulation text-lg"
@@ -106,7 +106,7 @@ export function Toolbar({
   }
 
   return (
-    <div className="fixed left-0 top-0 bottom-0 w-14 bg-ink flex flex-col items-center py-2 gap-0.5 z-20 shadow-xl select-none overflow-y-auto">
+    <div className="hidden sm:flex fixed left-0 top-0 bottom-0 w-14 bg-ink flex-col items-center py-2 gap-0.5 z-20 shadow-xl select-none overflow-y-auto">
       {/* Collapse toggle */}
       <button
         onClick={onToggleCollapsed}

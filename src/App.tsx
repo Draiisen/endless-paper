@@ -18,6 +18,7 @@ import { audioManager } from './engine/audio-manager';
 import { WelcomeModal } from './components/WelcomeModal';
 import { HelpPanel } from './components/HelpPanel';
 import { createTemplate, TemplateName } from './engine/templates';
+import { ColorPicker } from './components/ColorPicker';
 
 function makeInitialViewport(): Viewport {
   return { x: window.innerWidth / 2 - 200, y: window.innerHeight / 2 - 150, scale: 1 };
@@ -968,11 +969,57 @@ export default function App({ initialState, settings }: AppProps) {
         onToggleCollapsed={() => setToolbarCollapsed(v => !v)}
       />
 
+      {/* ── Mobile toolbar — bottom bar, hidden on sm+ ── */}
+      {!viewerMode && (
+        <div
+          className="sm:hidden fixed left-0 right-0 z-20 flex items-center gap-1 px-2 bg-ink border-t border-white/10"
+          style={{ bottom: 0, paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 6px)', paddingTop: '6px' }}
+        >
+          {/* Stroke color */}
+          <ColorPicker
+            value={strokeColor}
+            onChange={setStrokeColor}
+            title="Couleur trait"
+            swatchClassName="w-10 h-10 rounded-full border-2 border-white/30 cursor-pointer flex-shrink-0 touch-manipulation"
+          />
+          {/* Stroke width tap-to-cycle */}
+          <button
+            className="w-9 flex flex-col items-center justify-center gap-0.5 touch-manipulation flex-shrink-0"
+            title={`Épaisseur: ${strokeWidth}`}
+            onClick={() => setStrokeWidth(strokeWidth >= 16 ? 1 : strokeWidth + 1)}
+          >
+            <div className="rounded-full bg-white/60 flex-shrink-0" style={{ width: `${Math.max(3, Math.min(16, strokeWidth * 2))}px`, height: `${Math.max(3, Math.min(16, strokeWidth * 2))}px` }} />
+            <span className="text-[8px] text-gray-500 font-mono leading-none">{strokeWidth}</span>
+          </button>
+          <div className="w-px h-8 bg-white/15 flex-shrink-0 mx-0.5" />
+          {/* Essential tools */}
+          {([
+            { id: 'pen',    icon: <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg> },
+            { id: 'select', icon: <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current"><path d="M4 0l16 12-7 2-4 8L4 0z"/></svg> },
+            { id: 'hand',   icon: <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current"><path d="M23 5.5V20c0 2.2-1.8 4-4 4h-7.3c-1.08 0-2.1-.43-2.85-1.19L1 14.83s1.26-1.23 1.3-1.25c.22-.19.49-.29.79-.29.22 0 .42.06.6.16.04.03 4.31 2.46 4.31 2.46V4c0-.83.67-1.5 1.5-1.5S11 3.17 11 4v7h1V1.5c0-.83.67-1.5 1.5-1.5S15 .67 15 1.5V11h1V2.5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5V11h1V5.5c0-.83.67-1.5 1.5-1.5S23 4.67 23 5.5z"/></svg> },
+            { id: 'eraser', icon: <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current"><path d="M15.14 3c-.51 0-1.02.2-1.41.59L2.59 14.73c-.78.77-.78 2.04 0 2.83L5.17 20H20v-2H9.84l-4-4L17 2.94l4 4V8h2V6.59c0-.51-.2-1.02-.59-1.41l-3.86-3.77C14.16 3.2 13.65 3 13.14 3h2z"/></svg> },
+            { id: 'text',   icon: <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current"><path d="M5 4v3h5.5v12h3V7H19V4z"/></svg> },
+          ] as { id: ToolType; icon: React.ReactNode }[]).map(({ id, icon }) => (
+            <button
+              key={id}
+              className={`flex-1 h-11 flex items-center justify-center rounded-xl touch-manipulation transition-colors ${tool === id ? 'bg-accent text-white' : 'text-gray-400 active:bg-white/10 active:text-white'}`}
+              onClick={() => setTool(id)}
+            >{icon}</button>
+          ))}
+          <div className="w-px h-8 bg-white/15 flex-shrink-0 mx-0.5" />
+          {/* Image import */}
+          <label className="flex-shrink-0 w-10 h-11 flex items-center justify-center rounded-xl text-gray-400 active:bg-white/10 active:text-white touch-manipulation cursor-pointer">
+            <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+            <input type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) { handleImageImport(f); (e.target as HTMLInputElement).value = ''; } }} />
+          </label>
+        </div>
+      )}
+
       {/* Top bar */}
       {(() => {
-        const tbLeft = toolbarCollapsed ? 'left-9' : 'left-14';
+        const tbLeft = toolbarCollapsed ? 'sm:left-9' : 'sm:left-14';
         return (
-          <div className={`fixed top-0 ${tbLeft} right-0 h-12 bg-ink/95 backdrop-blur-sm flex items-center px-3 gap-1.5 z-10`}>
+          <div className={`fixed top-0 left-0 ${tbLeft} right-0 h-12 bg-ink/95 backdrop-blur-sm flex items-center px-3 gap-1.5 z-10`}>
 
             {/* Desktop title — hidden on mobile */}
             <span className="text-accent font-semibold text-sm hidden sm:block flex-shrink-0">✏ Endless Paper</span>

@@ -161,8 +161,9 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   const dragAnchorPartRef = useRef<'anchor' | 'in' | 'out'>('anchor');
   const selectedAnchorIdxRef = useRef<number | null>(null);
 
-  // Portal flash state
+  // Portal / scene-enter flash state
   const isPortalingRef = useRef(false);
+  const enterFlashRef = useRef(0); // 0..1 fade progress (drives white flash on scene entry)
 
   // Auto-exit zoom debounce
   const lastAutoExitTimeRef = useRef(0);
@@ -332,6 +333,17 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
       const h = canvas?.height ?? window.innerHeight;
       const innerVp = { x: w / 2, y: h / 2, scale: 1 };
       // Prevent auto-exit from firing on the scale drop caused by this programmatic reset.
+      // Brief white flash to mask the hard scene switch
+      enterFlashRef.current = 1;
+      const fadeStart = performance.now();
+      const fadeStep = () => {
+        const elapsed = performance.now() - fadeStart;
+        enterFlashRef.current = Math.max(0, 1 - elapsed / 300);
+        needsRenderRef.current = true;
+        if (enterFlashRef.current > 0) requestAnimationFrame(fadeStep);
+      };
+      requestAnimationFrame(fadeStep);
+
       lastAutoExitTimeRef.current = Date.now();
       prevScaleRef.current = 1;
       setSceneStack(newStack);
@@ -859,6 +871,15 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
             ctx.save();
             ctx.setTransform(1, 0, 0, 1, 0, 0);
             ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.restore();
+          }
+
+          // Scene-entry flash (fades out over 300ms)
+          if (enterFlashRef.current > 0) {
+            ctx.save();
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.fillStyle = `rgba(255, 255, 255, ${enterFlashRef.current * 0.6})`;
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             ctx.restore();
           }
