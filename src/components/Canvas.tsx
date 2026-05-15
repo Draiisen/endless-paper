@@ -12,6 +12,18 @@ import { vectorizeImage } from '../engine/vectorizer';
 import { transformPathCoords, parsePathToAnchors, anchorsToPath, PathAnchor } from '../engine/svg-path';
 import { mirroredPaths, mirroredPoints, symmetryTransforms } from '../engine/symmetry';
 
+/** Returns the 8 selection handle positions (world coords) for a node, matching renderer layout. */
+function getResizeHandlePositions(node: import('../types/scene').SceneNode): [number, number][] {
+  const p = 4; // padding matching drawSelectionHandles
+  const x = node.x - p, y = node.y - p;
+  const w = node.width + p * 2, h = node.height + p * 2;
+  return [
+    [x, y], [x + w, y], [x, y + h], [x + w, y + h],   // corners: TL, TR, BL, BR
+    [x + w / 2, y], [x + w / 2, y + h],                 // top/bottom center
+    [x, y + h / 2], [x + w, y + h / 2],                 // left/right center
+  ];
+}
+
 /** DFS search for a scene by id in the root scene tree. */
 function findSceneById(root: import('../types/scene').Scene, targetId: string): import('../types/scene').Scene | null {
   if (root.id === targetId) return root;
@@ -77,6 +89,7 @@ interface TextEditState {
   worldY: number;
   value: string;
   fontSize: number;
+  editingNodeId?: string; // set when editing an existing text node
 }
 
 export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
@@ -103,6 +116,11 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   const [isVectorizing, setIsVectorizing] = useState(false);
   const [textEdit, setTextEdit] = useState<TextEditState | null>(null);
   const textCommittedRef = useRef(false);
+  const resizeStateRef = useRef<{
+    handleIdx: number; nodeId: string;
+    origX: number; origY: number; origW: number; origH: number;
+    accumDx: number; accumDy: number;
+  } | null>(null);
   const [enterHintNodeId, setEnterHintNodeId] = useState<string | null>(null);
   const enterHintNodeIdRef = useRef<string | null>(null);
   useEffect(() => { enterHintNodeIdRef.current = enterHintNodeId; needsRenderRef.current = true; }, [enterHintNodeId]);
@@ -409,6 +427,28 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
     onShapeMove: useCallback(() => { markDirty(); }, [markDirty]),
 
     onSelect: useCallback((worldX: number, worldY: number, additive: boolean) => {
+      // Check if the click lands on a resize handle of the single selected node.
+      const selIds = selectedNodeIdsRef.current;
+      if (selIds.size === 1) {
+        const selNode = sceneRef.current.nodes.find(n => n.id === Array.from(selIds)[0]);
+        if (selNode) {
+          const hitR = Math.max(6, 8 / viewportRef.current.scale);
+          const handles = getResizeHandlePositions(selNode);
+          for (let i = 0; i < handles.length; i++) {
+            const [hx, hy] = handles[i];
+            if (Math.abs(worldX - hx) <= hitR && Math.abs(worldY - hy) <= hitR) {
+              resizeStateRef.current = {
+                handleIdx: i, nodeId: selNode.id,
+                origX: selNode.x, origY: selNode.y,
+                origW: selNode.width, origH: selNode.height,
+                accumDx: 0, accumDy: 0,
+              };
+              draggedNodeIdsRef.current = new Set(); // prevent move logic
+              return;
+            }
+          }
+        }
+      }
       const node = getNodeAtPoint(sceneRef.current, worldX, worldY);
       if (node) {
         // Check hotspot (click trigger) — only when viewerMode
@@ -478,6 +518,33 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
     }, [setSelectedNodeIds, markDirty, onHotspotClick, setScene, setViewport, setSceneStack]),
 
     onDragMove: useCallback((dx: number, dy: number) => {
+      // Resize mode: one of the selection handles is being dragged
+      if (resizeStateRef.current) {
+        const rs = resizeStateRef.current;
+        rs.accumDx += dx;
+        rs.accumDy += dy;
+        const { handleIdx, nodeId, origX, origY, origW, origH, accumDx, accumDy } = rs;
+        const MIN = 10;
+        let nx = origX, ny = origY, nw = origW, nh = origH;
+        // TL=0 TR=1 BL=2 BR=3 TC=4 BC=5 LC=6 RC=7
+        if (handleIdx === 0) { nx = origX + accumDx; nw = origW - accumDx; ny = origY + accumDy; nh = origH - accumDy; }
+        else if (handleIdx === 1) { nw = origW + accumDx; ny = origY + accumDy; nh = origH - accumDy; }
+        else if (handleIdx === 2) { nx = origX + accumDx; nw = origW - accumDx; nh = origH + accumDy; }
+        else if (handleIdx === 3) { nw = origW + accumDx; nh = origH + accumDy; }
+        else if (handleIdx === 4) { ny = origY + accumDy; nh = origH - accumDy; }
+        else if (handleIdx === 5) { nh = origH + accumDy; }
+        else if (handleIdx === 6) { nx = origX + accumDx; nw = origW - accumDx; }
+        else if (handleIdx === 7) { nw = origW + accumDx; }
+        if (nw < MIN) { if (nx !== origX) nx = origX + origW - MIN; nw = MIN; }
+        if (nh < MIN) { if (ny !== origY) ny = origY + origH - MIN; nh = MIN; }
+        const newScene = {
+          ...sceneRef.current,
+          nodes: sceneRef.current.nodes.map(n => n.id === nodeId ? { ...n, x: nx, y: ny, width: nw, height: nh } : n),
+        };
+        setScene(newScene);
+        markDirty();
+        return;
+      }
       if (draggedNodeIdsRef.current.size === 0) return;
       dragHasMovedRef.current = true;
       const ids = draggedNodeIdsRef.current;
@@ -492,6 +559,11 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
     }, [setScene, markDirty]),
 
     onDragEnd: useCallback(() => {
+      if (resizeStateRef.current) {
+        onSceneChange(sceneRef.current, viewportRef.current);
+        resizeStateRef.current = null;
+        return;
+      }
       if (draggedNodeIdsRef.current.size > 0 && dragHasMovedRef.current) {
         onSceneChange(sceneRef.current, viewportRef.current);
         isDirtyRef.current = false;
@@ -522,6 +594,21 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
       if (node.hotspot && node.hotspot.trigger === 'doubleclick' && onHotspotClick) {
         const handled = onHotspotClick(node, viewportRef.current);
         if (handled) return;
+      }
+      // Double-clicking a text node opens the inline editor
+      if (node.type === 'text') {
+        const vp = viewportRef.current;
+        const sx = node.x * vp.scale + vp.x;
+        const sy = node.y * vp.scale + vp.y;
+        textCommittedRef.current = false;
+        setTextEdit({
+          screenX: sx, screenY: sy,
+          worldX: node.x, worldY: node.y,
+          value: node.text ?? '',
+          fontSize: node.fontSize ?? 16,
+          editingNodeId: node.id,
+        });
+        return;
       }
       performEnterScene(node);
     }, [performEnterScene, onHotspotClick]),
@@ -730,6 +817,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
     const zoomingIn = viewport.scale > prevScaleRef.current * 1.0001 || lastWheelDeltaY.current < 0;
     const zoomingOut = viewport.scale < prevScaleRef.current * 0.9999 || lastWheelDeltaY.current > 0;
     prevScaleRef.current = viewport.scale;
+    lastWheelDeltaY.current = 0; // consume — don't carry over to next viewport change (e.g. pan or teleport)
 
     if (autoCandidate && zoomingIn) {
       lastWheelDeltaY.current = 0;
@@ -919,17 +1007,32 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
     if (!textEdit || textCommittedRef.current) return;
     textCommittedRef.current = true;
     const text = textEdit.value;
-    if (text.trim().length > 0) {
-      const ctx = canvasRef.current?.getContext('2d');
-      const fontSize = textEdit.fontSize;
-      let measuredW = 100;
-      if (ctx) {
-        ctx.font = `${fontSize}px system-ui, sans-serif`;
-        const lines = text.split('\n');
-        measuredW = Math.max(...lines.map(l => ctx.measureText(l).width));
+    const ctx = canvasRef.current?.getContext('2d');
+    const fontSize = textEdit.fontSize;
+    let measuredW = 100;
+    if (ctx && text.trim().length > 0) {
+      ctx.font = `${fontSize}px system-ui, sans-serif`;
+      measuredW = Math.max(...text.split('\n').map(l => ctx.measureText(l).width));
+    }
+    const lineCount = Math.max(1, text.split('\n').length);
+    const measuredH = fontSize * 1.2 * lineCount;
+
+    if (textEdit.editingNodeId) {
+      // Update existing text node in place (double-click to edit flow)
+      if (text.trim().length > 0) {
+        const newScene = {
+          ...sceneRef.current,
+          nodes: sceneRef.current.nodes.map(n => n.id === textEdit.editingNodeId
+            ? { ...n, text, width: measuredW + 4, height: measuredH + 4 }
+            : n),
+        };
+        setScene(newScene);
+        onSceneChange(newScene, viewportRef.current);
+        markDirty();
       }
-      const lineCount = text.split('\n').length;
-      const measuredH = fontSize * 1.2 * lineCount;
+      // If empty, leave the node as-is (don't delete on empty edit)
+    } else if (text.trim().length > 0) {
+      // Create new text node
       const node = createNode('text', textEdit.worldX, textEdit.worldY, measuredW + 4, measuredH + 4);
       node.text = text;
       node.fontSize = fontSize;

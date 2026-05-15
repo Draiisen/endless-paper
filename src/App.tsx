@@ -86,6 +86,7 @@ export default function App({ initialState, settings }: AppProps) {
   const autoSaveTimerRef = useRef<number | null>(null);
   const canvasHandleRef = useRef<CanvasHandle | null>(null);
   const lodCancelsRef = useRef<Set<() => void>>(new Set());
+  const clipboardRef = useRef<import('./types/scene').SceneNode[]>([]);
 
   const history = useHistory(initScene, initViewport);
   const [scene, setSceneState] = useState<Scene>(initScene);
@@ -699,6 +700,31 @@ export default function App({ initialState, settings }: AppProps) {
       if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
         e.preventDefault();
         setSelectedNodeIds(new Set(sceneRef.current.nodes.map(n => n.id)));
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+        e.preventDefault();
+        const copied = sceneRef.current.nodes.filter(n => selectedNodeIds.has(n.id));
+        if (copied.length > 0) clipboardRef.current = copied;
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+        e.preventDefault();
+        if (clipboardRef.current.length === 0) return;
+        const OFFSET = 20;
+        const groupIdMap = new Map<string, string>();
+        const pasted = clipboardRef.current.map(n => {
+          let groupId = n.groupId;
+          if (groupId) {
+            if (!groupIdMap.has(groupId)) groupIdMap.set(groupId, generateId());
+            groupId = groupIdMap.get(groupId);
+          }
+          return { ...n, id: generateId(), x: n.x + OFFSET, y: n.y + OFFSET, groupId };
+        });
+        const newScene = { ...sceneRef.current, nodes: [...sceneRef.current.nodes, ...pasted] };
+        setScene(newScene);
+        handleSceneChange(newScene, viewport);
+        setSelectedNodeIds(new Set(pasted.map(n => n.id)));
         return;
       }
       if (e.key === 'Escape') {
