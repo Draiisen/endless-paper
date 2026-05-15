@@ -5,6 +5,7 @@ import { SceneCatalogEntry } from '../engine/scene-graph';
 interface PropertiesPanelProps {
   node: SceneNode;
   sceneCatalog: SceneCatalogEntry[];
+  currentSceneId?: string;
   onUpdate: (updates: Partial<SceneNode>) => void;
   onAddAudio: () => void;
   currentSceneAudio: SceneAudio | undefined;
@@ -16,7 +17,7 @@ const ANIM_TYPES: NodeAnimation['type'][] = ['pulse', 'wobble', 'float', 'fade']
 
 type Tab = 'text' | 'image' | 'hotspot' | 'portal' | 'anim' | 'audio';
 
-export function PropertiesPanel({ node, sceneCatalog, onUpdate, onAddAudio, currentSceneAudio, onUpdateSceneAudio, onClose }: PropertiesPanelProps) {
+export function PropertiesPanel({ node, sceneCatalog, currentSceneId, onUpdate, onAddAudio, currentSceneAudio, onUpdateSceneAudio, onClose }: PropertiesPanelProps) {
   const isText = node.type === 'text';
   const isImage = node.type === 'image';
   const [activeTab, setActiveTab] = useState<Tab>(isText ? 'text' : isImage ? 'image' : 'hotspot');
@@ -63,7 +64,7 @@ export function PropertiesPanel({ node, sceneCatalog, onUpdate, onAddAudio, curr
           <HotspotEditor hotspot={node.hotspot} onChange={hs => onUpdate({ hotspot: hs })} />
         )}
         {activeTab === 'portal' && (
-          <PortalEditor portal={node.portal} catalog={sceneCatalog} nodeId={node.id} onChange={p => onUpdate({ portal: p })} />
+          <PortalEditor portal={node.portal} catalog={sceneCatalog} currentSceneId={currentSceneId} nodeId={node.id} onChange={p => onUpdate({ portal: p })} />
         )}
         {activeTab === 'anim' && (
           <AnimEditor anim={node.animation} onChange={a => onUpdate({ animation: a })} />
@@ -230,14 +231,15 @@ function HotspotEditor({ hotspot, onChange }: { hotspot: Hotspot | undefined; on
   );
 }
 
-function PortalEditor({ portal, catalog, nodeId, onChange }: {
+function PortalEditor({ portal, catalog, currentSceneId, onChange }: {
   portal: { targetSceneId: string; targetCamera?: import('../types/scene').Viewport } | undefined;
   catalog: SceneCatalogEntry[];
-  nodeId: string;
+  currentSceneId?: string;
+  nodeId?: string;
   onChange: (p: typeof portal) => void;
 }) {
   const enabled = !!portal;
-  const others = catalog.filter(c => c.scene.id !== nodeId);
+  const others = catalog.filter(c => c.scene.id !== currentSceneId);
 
   return (
     <div className="flex flex-col gap-2">

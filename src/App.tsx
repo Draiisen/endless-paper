@@ -91,6 +91,8 @@ export default function App({ initialState, settings }: AppProps) {
 
   const savedFlashTimerRef = useRef<number | null>(null);
   const autoSaveTimerRef = useRef<number | null>(null);
+  const tourStopRef = useRef<(() => void) | null>(null);
+  const tourPlayingRef = useRef(false);
   const canvasHandleRef = useRef<CanvasHandle | null>(null);
   const lodCancelsRef = useRef<Set<() => void>>(new Set());
   const clipboardRef = useRef<import('./types/scene').SceneNode[]>([]);
@@ -432,6 +434,19 @@ export default function App({ initialState, settings }: AppProps) {
     setShowLibrary(false);
   }, [setScene, handleSceneChange]);
 
+  const handleDropAsset = useCallback((assetId: string, worldX: number, worldY: number) => {
+    const asset = assetsRef.current.find(a => a.id === assetId);
+    if (!asset) return;
+    const bb = asset.boundingBox;
+    const offsetX = worldX - bb.width / 2;
+    const offsetY = worldY - bb.height / 2;
+    const newNodes = asset.nodes.map(n => ({ ...n, id: generateId(), x: n.x + offsetX, y: n.y + offsetY }));
+    let newScene = sceneRef.current;
+    for (const node of newNodes) newScene = addNode(newScene, node);
+    setScene(newScene);
+    handleSceneChange(newScene, viewportRef.current);
+  }, [setScene, handleSceneChange]);
+
   // Start camera
   const handleSetStartCamera = useCallback(() => {
     const stack = sceneStackRef.current;
@@ -723,16 +738,35 @@ export default function App({ initialState, settings }: AppProps) {
 
   // Camera tour
   const handlePlayTour = useCallback(() => {
+    if (tourPlayingRef.current) {
+      tourStopRef.current?.();
+      return;
+    }
     const cameras = scene.cameras;
     if (!cameras || cameras.length === 0) return;
+
+    let stopped = false;
+    tourPlayingRef.current = true;
+    tourStopRef.current = () => {
+      stopped = true;
+      tourPlayingRef.current = false;
+      tourStopRef.current = null;
+      setTourPlaying(false);
+    };
+
     setTourPlaying(true);
     let i = 0;
     const playNext = () => {
-      if (i >= cameras.length) { setTourPlaying(false); return; }
+      if (stopped || i >= cameras.length) {
+        tourPlayingRef.current = false;
+        tourStopRef.current = null;
+        setTourPlaying(false);
+        return;
+      }
       const cam = cameras[i++];
       canvasHandleRef.current?.animateViewportTo(cam.viewport, () => {
-        setTimeout(playNext, cam.duration);
-      });
+        if (!stopped) setTimeout(playNext, cam.duration);
+      }, cam.transitionMs ?? 600);
     };
     playNext();
   }, [scene.cameras]);
@@ -884,6 +918,7 @@ export default function App({ initialState, settings }: AppProps) {
         activeLayerId={activeLayerId}
         viewerMode={viewerMode}
         onHotspotClick={handleNodeClick}
+        onDropAsset={handleDropAsset}
       />
 
       <Toolbar
@@ -1140,6 +1175,7 @@ export default function App({ initialState, settings }: AppProps) {
         <PropertiesPanel
           node={singleSelection}
           sceneCatalog={sceneCatalog}
+          currentSceneId={scene.id}
           onUpdate={handleUpdateSelectedNode}
           onAddAudio={handleAddAudio}
           currentSceneAudio={scene.audio}

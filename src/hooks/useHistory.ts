@@ -24,9 +24,8 @@ export function useHistory(initialScene: Scene, initialViewport: Viewport) {
     // Limit history size
     if (newHistory.length > MAX_HISTORY) {
       newHistory.shift();
-    } else {
-      indexRef.current = newHistory.length - 1;
     }
+    indexRef.current = newHistory.length - 1;
 
     historyRef.current = newHistory;
     forceUpdate((n) => n + 1);

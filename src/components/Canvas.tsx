@@ -54,7 +54,7 @@ export interface CanvasHandle {
   enterSelected: () => void;
   groupSelected: () => void;
   ungroupSelected: () => void;
-  animateViewportTo: (target: Viewport, onComplete: () => void) => void;
+  animateViewportTo: (target: Viewport, onComplete: () => void, durationMs?: number) => void;
 }
 
 interface CanvasProps {
@@ -80,6 +80,7 @@ interface CanvasProps {
   activeLayerId?: string;
   viewerMode?: boolean;
   onHotspotClick?: (node: SceneNode, viewport: Viewport) => boolean;
+  onDropAsset?: (assetId: string, worldX: number, worldY: number) => void;
 }
 
 interface TextEditState {
@@ -108,6 +109,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   activeLayerId,
   viewerMode = false,
   onHotspotClick,
+  onDropAsset,
 }, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number>(0);
@@ -697,7 +699,8 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
       const me = getMarqueeEnd();
       const liveShapeActive = !!(ss && se && (toolRef.current === 'rect' || toolRef.current === 'circle'));
 
-      if (needsRenderRef.current || liveStrokeActive || liveShapeActive || (ms && me)) {
+      const hasAnimatedNodes = sceneRef.current.nodes.some(n => n.animation);
+      if (needsRenderRef.current || liveStrokeActive || liveShapeActive || (ms && me) || hasAnimatedNodes) {
         const ctx = canvas.getContext('2d');
         if (ctx) {
           const symmMode = symmetryRef.current;
@@ -716,6 +719,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
             symmetryCenter: symmMode !== 'off' ? { x: symmCx, y: symmCy } : null,
             pathEditNodeId: pathEditNodeIdRef.current,
             pathEditAnchors: pathAnchorsRef.current.length > 0 ? pathAnchorsRef.current : undefined,
+            animationTime: Date.now(),
           });
 
           // Draw live stroke (and mirrored previews)
@@ -907,6 +911,15 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+
+    // Asset library drag
+    const assetId = e.dataTransfer.getData('application/x-endless-asset');
+    if (assetId && onDropAsset) {
+      const dropWorld = screenToWorld(e.clientX, e.clientY, viewportRef.current);
+      onDropAsset(assetId, dropWorld.x, dropWorld.y);
+      return;
+    }
+
     const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
     if (files.length === 0) return;
 
@@ -1020,8 +1033,8 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
     enterSelected,
     groupSelected,
     ungroupSelected,
-    animateViewportTo: (target: Viewport, onComplete: () => void) => {
-      animateViewport(target, 250, onComplete);
+    animateViewportTo: (target: Viewport, onComplete: () => void, durationMs?: number) => {
+      animateViewport(target, durationMs ?? 600, onComplete);
     },
   }), [vectorizeSelected, cancelStroke, enterSelected, groupSelected, ungroupSelected, animateViewport]);
 
