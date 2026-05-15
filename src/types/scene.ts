@@ -106,6 +106,7 @@ export interface SceneNode {
 
   // Marks reference image (renders below all)
   isReference?: boolean;
+  referenceOpacity?: number; // 0..1, default 0.35
 
   // Level-of-detail data generated automatically on image import
   lod?: ImageLOD;

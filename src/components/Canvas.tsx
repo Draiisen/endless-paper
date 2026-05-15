@@ -535,6 +535,18 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
         else if (handleIdx === 5) { nh = origH + accumDy; }
         else if (handleIdx === 6) { nx = origX + accumDx; nw = origW - accumDx; }
         else if (handleIdx === 7) { nw = origW + accumDx; }
+        // Shift constrains aspect ratio for corner handles (0-3)
+        if (shiftKeyRef.current && handleIdx <= 3 && origW > 0 && origH > 0) {
+          const aspect = origW / origH;
+          const dw = nw - origW, dh = nh - origH;
+          if (Math.abs(dw / origW) >= Math.abs(dh / origH)) {
+            nh = nw / aspect;
+            if (handleIdx === 0 || handleIdx === 2) ny = origY + (origH - nh);
+          } else {
+            nw = nh * aspect;
+            if (handleIdx === 0 || handleIdx === 1) nx = origX + (origW - nw);
+          }
+        }
         if (nw < MIN) { if (nx !== origX) nx = origX + origW - MIN; nw = MIN; }
         if (nh < MIN) { if (ny !== origY) ny = origY + origH - MIN; nh = MIN; }
         const newScene = {
@@ -755,18 +767,20 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
     return () => window.removeEventListener('resize', resize);
   }, []);
 
-  // Keyboard: space for pan
+  const shiftKeyRef = useRef(false);
+
+  // Keyboard: space for pan + shift tracking for constrained resize
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.code === 'Space' && e.target === document.body) {
         e.preventDefault();
         setSpaceDown(true);
       }
+      if (e.key === 'Shift') shiftKeyRef.current = true;
     };
     const onKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'Space') {
-        setSpaceDown(false);
-      }
+      if (e.code === 'Space') setSpaceDown(false);
+      if (e.key === 'Shift') shiftKeyRef.current = false;
     };
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);

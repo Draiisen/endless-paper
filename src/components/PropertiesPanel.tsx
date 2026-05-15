@@ -13,18 +13,21 @@ interface PropertiesPanelProps {
 
 const ANIM_TYPES: NodeAnimation['type'][] = ['pulse', 'wobble', 'float', 'fade'];
 
-type Tab = 'text' | 'hotspot' | 'portal' | 'anim' | 'audio';
+type Tab = 'text' | 'image' | 'hotspot' | 'portal' | 'anim' | 'audio';
 
 export function PropertiesPanel({ node, sceneCatalog, onUpdate, onAddAudio, currentSceneAudio, onUpdateSceneAudio }: PropertiesPanelProps) {
   const isText = node.type === 'text';
-  const [activeTab, setActiveTab] = useState<Tab>(isText ? 'text' : 'hotspot');
+  const isImage = node.type === 'image';
+  const [activeTab, setActiveTab] = useState<Tab>(isText ? 'text' : isImage ? 'image' : 'hotspot');
 
   const tabs: Tab[] = isText
     ? ['text', 'hotspot', 'portal', 'anim', 'audio']
+    : isImage
+    ? ['image', 'hotspot', 'portal', 'anim', 'audio']
     : ['hotspot', 'portal', 'anim', 'audio'];
 
   const tabIcon: Record<Tab, string> = {
-    text: 'T', hotspot: '💬', portal: '🌀', anim: '✨', audio: '🔊',
+    text: 'T', image: '🖼', hotspot: '💬', portal: '🌀', anim: '✨', audio: '🔊',
   };
 
   return (
@@ -44,6 +47,9 @@ export function PropertiesPanel({ node, sceneCatalog, onUpdate, onAddAudio, curr
       <div className="flex-1 p-3 flex flex-col gap-3">
         {activeTab === 'text' && isText && (
           <TextEditor node={node} onUpdate={onUpdate} />
+        )}
+        {activeTab === 'image' && isImage && (
+          <ImageEditor node={node} onUpdate={onUpdate} />
         )}
         {activeTab === 'hotspot' && (
           <HotspotEditor hotspot={node.hotspot} onChange={hs => onUpdate({ hotspot: hs })} />
@@ -123,6 +129,28 @@ function TextEditor({ node, onUpdate }: { node: SceneNode; onUpdate: (u: Partial
           <option value="'Arial Black', sans-serif">Arial Black</option>
         </select>
       </div>
+    </div>
+  );
+}
+
+function ImageEditor({ node, onUpdate }: { node: SceneNode; onUpdate: (u: Partial<SceneNode>) => void }) {
+  const opacity = node.referenceOpacity ?? 0.35;
+  return (
+    <div className="flex flex-col gap-3">
+      <label className="flex items-center gap-2 cursor-pointer">
+        <input type="checkbox" checked={!!node.isReference}
+          onChange={e => onUpdate({ isReference: e.target.checked })}
+          className="accent-accent" />
+        <span>Reference layer (renders below)</span>
+      </label>
+      {node.isReference && (
+        <div className="flex flex-col gap-1">
+          <span className="text-gray-400">Opacity <span className="text-gray-500">{Math.round(opacity * 100)}%</span></span>
+          <input type="range" min={5} max={100} value={Math.round(opacity * 100)}
+            onChange={e => onUpdate({ referenceOpacity: Number(e.target.value) / 100 })}
+            className="accent-accent" />
+        </div>
+      )}
     </div>
   );
 }

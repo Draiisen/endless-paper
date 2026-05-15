@@ -194,7 +194,6 @@ export default function App({ initialState, settings }: AppProps) {
   }, []);
 
   const handleSceneChange = useCallback((s: Scene, vp: Viewport) => {
-    history.push(s, vp);
     const stack = sceneStackRef.current;
     const lastIdx = stack.length - 1;
     const newStack = stack.map((entry, i) => i === lastIdx ? { ...entry, scene: s } : entry);
@@ -216,6 +215,8 @@ export default function App({ initialState, settings }: AppProps) {
       }
       rootSceneRef.current = newStack[0].scene;
     }
+    // Push root scene so undo can reconstruct the full stack from any depth
+    history.push(newStack[0].scene, vp);
     setSceneStackState(newStack);
     sceneStackRef.current = newStack;
     scheduleAutoSave();
@@ -261,33 +262,37 @@ export default function App({ initialState, settings }: AppProps) {
     return () => { for (const fn of cancels) fn(); cancels.clear(); };
   }, []);
 
+  // Navigate from historical root scene down through the current stack's parentNodeId chain.
+  // Handles nested scenes correctly: parent scenes are rebuilt from root history entry.
+  const applyHistoryEntry = useCallback((entry: { scene: Scene; viewport: Viewport }) => {
+    const stack = sceneStackRef.current;
+    // entry.scene is the root — follow parentNodeId chain to reach current depth
+    let current = entry.scene;
+    const newStack: typeof stack = [{ ...stack[0], scene: current }];
+    for (let i = 1; i < stack.length; i++) {
+      const parentNodeId = stack[i].parentNodeId;
+      const child = current.nodes.find(n => n.id === parentNodeId);
+      if (!child?.innerScene) break; // inner scene missing in this historical state — stop here
+      current = child.innerScene;
+      newStack.push({ ...stack[i], scene: current });
+    }
+    rootSceneRef.current = newStack[0].scene;
+    setSceneStackState(newStack);
+    sceneStackRef.current = newStack;
+    setScene(newStack[newStack.length - 1].scene);
+    setViewport(entry.viewport);
+    scheduleAutoSave();
+  }, [setScene, scheduleAutoSave]);
+
   const handleUndo = useCallback(() => {
     const entry = history.undo();
-    if (entry) {
-      setScene(entry.scene);
-      setViewport(entry.viewport);
-      const stack = sceneStackRef.current;
-      const newStack = stack.map((e, i) => i === stack.length - 1 ? { ...e, scene: entry.scene } : e);
-      setSceneStackState(newStack);
-      sceneStackRef.current = newStack;
-      if (newStack.length === 1) rootSceneRef.current = entry.scene;
-      scheduleAutoSave();
-    }
-  }, [history, setScene, scheduleAutoSave]);
+    if (entry) applyHistoryEntry(entry);
+  }, [history, applyHistoryEntry]);
 
   const handleRedo = useCallback(() => {
     const entry = history.redo();
-    if (entry) {
-      setScene(entry.scene);
-      setViewport(entry.viewport);
-      const stack = sceneStackRef.current;
-      const newStack = stack.map((e, i) => i === stack.length - 1 ? { ...e, scene: entry.scene } : e);
-      setSceneStackState(newStack);
-      sceneStackRef.current = newStack;
-      if (newStack.length === 1) rootSceneRef.current = entry.scene;
-      scheduleAutoSave();
-    }
-  }, [history, setScene, scheduleAutoSave]);
+    if (entry) applyHistoryEntry(entry);
+  }, [history, applyHistoryEntry]);
 
   const navigateTo = useCallback((index: number) => {
     const stack = sceneStackRef.current;
@@ -472,7 +477,7 @@ export default function App({ initialState, settings }: AppProps) {
     setViewport(sv);
   }, [getRootScene, setScene, setSceneStack]);
 
-  // Update selected node properties
+  // Update selected node properties (single selection)
   const handleUpdateSelectedNode = useCallback((updates: Partial<import('./types/scene').SceneNode>) => {
     if (selectedNodeIds.size !== 1) return;
     const id = Array.from(selectedNodeIds)[0];
@@ -480,6 +485,7 @@ export default function App({ initialState, settings }: AppProps) {
     setScene(newScene);
     handleSceneChange(newScene, viewportRef.current);
   }, [selectedNodeIds, setScene, handleSceneChange]);
+
 
   // Scene audio
   const handleAddAudio = useCallback(() => {
@@ -953,6 +959,49 @@ export default function App({ initialState, settings }: AppProps) {
           currentSceneAudio={scene.audio}
           onUpdateSceneAudio={handleUpdateSceneAudio}
         />
+      )}
+
+      {/* Multi-select quick property bar */}
+      {hasMultiSelection && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3 px-4 py-2 bg-ink/90 backdrop-blur-sm border border-white/10 rounded-xl text-xs text-gray-300 shadow-xl">
+          <span className="text-gray-500">{selectedNodes.length} selected</span>
+          <div className="w-px h-4 bg-white/20" />
+          <label className="flex items-center gap-1.5 cursor-pointer">
+            <span className="text-gray-400">Fill</span>
+            <input type="color"
+              value={selectedNodes[0]?.fill ?? selectedNodes[0]?.path?.fill ?? '#ffffff'}
+              onChange={e => {
+                const color = e.target.value;
+                const ids = selectedNodeIds;
+                const newScene = { ...sceneRef.current, nodes: sceneRef.current.nodes.map(n => {
+                  if (!ids.has(n.id)) return n;
+                  if (n.type === 'path' && n.path) return { ...n, path: { ...n.path, fill: color } };
+                  if (n.type === 'text') return { ...n, color };
+                  return { ...n, fill: color };
+                })};
+                setScene(newScene);
+                handleSceneChange(newScene, viewportRef.current);
+              }}
+              className="w-7 h-6 rounded border border-white/20 bg-transparent cursor-pointer" />
+          </label>
+          <label className="flex items-center gap-1.5 cursor-pointer">
+            <span className="text-gray-400">Stroke</span>
+            <input type="color"
+              value={selectedNodes[0]?.stroke ?? selectedNodes[0]?.path?.stroke ?? '#000000'}
+              onChange={e => {
+                const color = e.target.value;
+                const ids = selectedNodeIds;
+                const newScene = { ...sceneRef.current, nodes: sceneRef.current.nodes.map(n => {
+                  if (!ids.has(n.id)) return n;
+                  if (n.type === 'path' && n.path) return { ...n, path: { ...n.path, stroke: color } };
+                  return { ...n, stroke: color };
+                })};
+                setScene(newScene);
+                handleSceneChange(newScene, viewportRef.current);
+              }}
+              className="w-7 h-6 rounded border border-white/20 bg-transparent cursor-pointer" />
+          </label>
+        </div>
       )}
 
       {/* Mini-map */}

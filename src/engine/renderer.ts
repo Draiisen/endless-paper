@@ -105,7 +105,7 @@ export function renderScene(
       for (const node of arr) {
         if (!node.isReference) continue;
         if (!isNodeVisible(node, worldLeft, worldTop, worldRight, worldBottom)) continue;
-        ctx.globalAlpha = layer.opacity * 0.35;
+        ctx.globalAlpha = layer.opacity * (node.referenceOpacity ?? 0.35);
         drawNode(ctx, node, highlightSelected, false, animationTime, viewport.scale, viewerMode);
       }
     }
