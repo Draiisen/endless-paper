@@ -40,12 +40,14 @@ interface ToolbarProps {
   hasCameras: boolean;
   onPlayTour: () => void;
   tourPlaying: boolean;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
 }
 
 function ToolButton({ active, onClick, title, children }: { active: boolean; onClick: () => void; title: string; children: React.ReactNode }) {
   return (
     <button
-      className={`w-10 h-10 flex items-center justify-center rounded-lg transition-all text-lg ${active ? 'bg-accent text-white shadow-inner' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}
+      className={`w-11 h-11 flex items-center justify-center rounded-lg transition-all text-lg touch-manipulation ${active ? 'bg-accent text-white shadow-inner' : 'text-gray-400 active:text-white active:bg-white/10 hover:text-white hover:bg-white/10'}`}
       onClick={onClick} title={title}
     >{children}</button>
   );
@@ -79,18 +81,38 @@ export function Toolbar({
   showMiniMap, setShowMiniMap,
   onSaveToLibrary,
   onAddCamera, hasCameras, onPlayTour, tourPlaying,
+  collapsed, onToggleCollapsed,
 }: ToolbarProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showSymmetryMenu, setShowSymmetryMenu] = useState(false);
 
-  return (
-    <div className="fixed left-0 top-0 bottom-0 w-14 bg-ink flex flex-col items-center py-3 gap-1 z-20 shadow-xl select-none overflow-y-auto">
-      {/* Logo */}
-      <div className="w-10 h-10 flex items-center justify-center mb-2 flex-shrink-0">
-        <svg viewBox="0 0 24 24" className="w-7 h-7 fill-accent">
-          <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
-        </svg>
+  if (collapsed) {
+    return (
+      <div className="fixed left-0 top-0 bottom-0 w-9 bg-ink z-20 flex flex-col items-center pt-2 gap-2 select-none">
+        <button
+          onClick={onToggleCollapsed}
+          className="w-9 h-11 flex items-center justify-center text-gray-400 hover:text-white active:text-white touch-manipulation text-lg"
+          title="Expand toolbar"
+        >›</button>
+        {/* Current tool color dot — visible even collapsed */}
+        <div
+          className="w-5 h-5 rounded-full border-2 border-white/30 flex-shrink-0 cursor-pointer touch-manipulation"
+          style={{ background: strokeColor }}
+          onClick={onToggleCollapsed}
+          title="Expand toolbar"
+        />
       </div>
+    );
+  }
+
+  return (
+    <div className="fixed left-0 top-0 bottom-0 w-14 bg-ink flex flex-col items-center py-2 gap-0.5 z-20 shadow-xl select-none overflow-y-auto">
+      {/* Collapse toggle */}
+      <button
+        onClick={onToggleCollapsed}
+        className="w-11 h-8 flex items-center justify-center text-gray-500 hover:text-white active:text-white touch-manipulation text-base mb-1 flex-shrink-0"
+        title="Collapse toolbar"
+      >‹</button>
 
       <div className="w-10 h-px bg-white/10 mb-1 flex-shrink-0" />
 
@@ -136,7 +158,7 @@ export function Toolbar({
       </ToolButton>
 
       {canVectorize && (
-        <ToolButton active={false} onClick={onVectorize} title="Vectorize image (V)">
+        <ToolButton active={false} onClick={onVectorize} title="Vectorize image">
           <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current text-accent"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg>
         </ToolButton>
       )}
@@ -154,7 +176,7 @@ export function Toolbar({
       )}
 
       {hasSelection && (
-        <ToolButton active={false} onClick={onSaveToLibrary} title="Save to asset library">
+        <ToolButton active={false} onClick={onSaveToLibrary} title="Save to library">
           <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current"><path d="M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2z"/></svg>
         </ToolButton>
       )}
@@ -166,18 +188,16 @@ export function Toolbar({
       {/* Symmetry */}
       <div className="relative w-full flex justify-center">
         <button
-          className={`w-10 h-7 rounded text-[10px] font-semibold transition-colors flex-shrink-0 ${symmetry !== 'off' ? 'bg-accent text-white' : 'text-gray-500 hover:text-white border border-white/10'}`}
+          className={`w-11 h-9 rounded text-[10px] font-semibold transition-colors flex-shrink-0 touch-manipulation ${symmetry !== 'off' ? 'bg-accent text-white' : 'text-gray-500 active:text-white border border-white/10'}`}
           onClick={() => setShowSymmetryMenu(v => !v)}
           title="Symmetry"
-        >
-          SYM
-        </button>
+        >SYM</button>
         {showSymmetryMenu && (
           <div className="absolute left-12 bottom-0 bg-ink border border-white/10 rounded-lg shadow-xl z-30 min-w-[120px] py-1">
             {SYMMETRY_OPTIONS.map(opt => (
               <button
                 key={opt.value}
-                className={`w-full text-left px-3 py-1.5 text-[11px] transition-colors ${symmetry === opt.value ? 'text-accent' : 'text-gray-300 hover:text-white hover:bg-white/5'}`}
+                className={`w-full text-left px-3 py-2.5 text-[12px] touch-manipulation transition-colors ${symmetry === opt.value ? 'text-accent' : 'text-gray-300 active:text-white hover:text-white hover:bg-white/5'}`}
                 onClick={() => { setSymmetry(opt.value); setShowSymmetryMenu(false); }}
               >{opt.label}</button>
             ))}
@@ -186,30 +206,30 @@ export function Toolbar({
       </div>
 
       {/* Stabilizer */}
-      <div className="w-10 flex flex-col items-center gap-0.5 my-1 flex-shrink-0" title={`Stabilizer ${stabilizer}%`}>
+      <div className="w-11 flex flex-col items-center gap-0.5 my-1 flex-shrink-0" title={`Stabilizer ${stabilizer}%`}>
         <span className="text-[8px] text-gray-500 uppercase">STB</span>
         <input type="range" min={0} max={95} value={stabilizer}
           onChange={e => setStabilizer(Number(e.target.value))}
-          className="accent-accent"
-          style={{ writingMode: 'vertical-lr', direction: 'rtl', height: '40px', width: '10px' }}
+          className="accent-accent touch-manipulation"
+          style={{ writingMode: 'vertical-lr', direction: 'rtl', height: '44px', width: '10px' }}
         />
       </div>
 
       {/* Toggles */}
       <button
-        className={`w-10 h-7 rounded text-[10px] font-semibold transition-colors flex-shrink-0 ${pressureEnabled ? 'bg-accent text-white' : 'text-gray-500 hover:text-white border border-white/10'}`}
+        className={`w-11 h-9 rounded text-[10px] font-semibold transition-colors flex-shrink-0 touch-manipulation ${pressureEnabled ? 'bg-accent text-white' : 'text-gray-500 active:text-white border border-white/10'}`}
         onClick={() => setPressureEnabled(!pressureEnabled)}
         title="Pen pressure sensitivity"
       >PSI</button>
 
       <button
-        className={`w-10 h-7 rounded text-[10px] font-semibold transition-colors flex-shrink-0 ${autoEnterEnabled ? 'bg-accent text-white' : 'text-gray-500 hover:text-white border border-white/10'}`}
+        className={`w-11 h-9 rounded text-[10px] font-semibold transition-colors flex-shrink-0 touch-manipulation ${autoEnterEnabled ? 'bg-accent text-white' : 'text-gray-500 active:text-white border border-white/10'}`}
         onClick={() => setAutoEnterEnabled(!autoEnterEnabled)}
         title="Auto-enter scene on deep zoom"
       >ZOOM</button>
 
       <button
-        className={`w-10 h-7 rounded text-[10px] font-semibold transition-colors flex-shrink-0 ${showReference ? 'bg-accent/30 text-white' : 'text-gray-500 hover:text-white border border-white/10'}`}
+        className={`w-11 h-9 rounded text-[10px] font-semibold transition-colors flex-shrink-0 touch-manipulation ${showReference ? 'bg-accent/30 text-white' : 'text-gray-500 active:text-white border border-white/10'}`}
         onClick={() => setShowReference(!showReference)}
         title="Toggle reference images"
       >REF</button>
@@ -218,41 +238,44 @@ export function Toolbar({
       <div className="w-10 h-px bg-white/10 my-1 flex-shrink-0" />
 
       <button onClick={() => setShowLayers(!showLayers)} title="Layers panel"
-        className={`w-10 h-7 rounded text-[10px] transition-colors flex-shrink-0 ${showLayers ? 'bg-accent text-white' : 'text-gray-500 hover:text-white border border-white/10'}`}>
+        className={`w-11 h-9 rounded text-[10px] transition-colors flex-shrink-0 touch-manipulation ${showLayers ? 'bg-accent text-white' : 'text-gray-500 active:text-white border border-white/10'}`}>
         <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current mx-auto"><path d="M11.99 18.54l-7.37-5.73L3 14.07l9 7 9-7-1.63-1.27-7.38 5.74zM12 16l7.36-5.73L21 9l-9-7-9 7 1.63 1.27L12 16z"/></svg>
       </button>
 
       <button onClick={() => setShowLibrary(!showLibrary)} title="Asset library"
-        className={`w-10 h-7 rounded text-[10px] transition-colors flex-shrink-0 ${showLibrary ? 'bg-accent text-white' : 'text-gray-500 hover:text-white border border-white/10'}`}>
+        className={`w-11 h-9 rounded text-[10px] transition-colors flex-shrink-0 touch-manipulation ${showLibrary ? 'bg-accent text-white' : 'text-gray-500 active:text-white border border-white/10'}`}>
         <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current mx-auto"><path d="M17 3H7c-1.1 0-2 .9-2 2v16l7-3 7 3V5c0-1.1-.9-2-2-2z"/></svg>
       </button>
 
-      <button onClick={() => setShowMiniMap(!showMiniMap)} title="Mini-map (M)"
-        className={`w-10 h-7 rounded text-[10px] transition-colors flex-shrink-0 ${showMiniMap ? 'bg-accent text-white' : 'text-gray-500 hover:text-white border border-white/10'}`}>
+      <button onClick={() => setShowMiniMap(!showMiniMap)} title="Mini-map"
+        className={`w-11 h-9 rounded text-[10px] transition-colors flex-shrink-0 touch-manipulation ${showMiniMap ? 'bg-accent text-white' : 'text-gray-500 active:text-white border border-white/10'}`}>
         <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current mx-auto"><path d="M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5z"/></svg>
       </button>
 
       {/* Camera tour */}
-      <button onClick={onAddCamera} title="Add camera waypoint" className="w-10 h-7 rounded text-[10px] text-gray-500 hover:text-white border border-white/10 transition-colors flex-shrink-0">
+      <button onClick={onAddCamera} title="Add camera waypoint"
+        className="w-11 h-9 rounded text-[10px] text-gray-500 active:text-white border border-white/10 transition-colors flex-shrink-0 touch-manipulation">
         🎬
       </button>
       {hasCameras && (
-        <button onClick={onPlayTour} title={tourPlaying ? 'Stop tour' : 'Play camera tour'}
-          className={`w-10 h-7 rounded text-[10px] transition-colors flex-shrink-0 ${tourPlaying ? 'bg-red-500/80 text-white' : 'bg-accent/20 text-accent hover:bg-accent/40'}`}>
+        <button onClick={onPlayTour} title={tourPlaying ? 'Stop tour' : 'Play tour'}
+          className={`w-11 h-9 rounded text-[10px] transition-colors flex-shrink-0 touch-manipulation ${tourPlaying ? 'bg-red-500/80 text-white' : 'bg-accent/20 text-accent active:bg-accent/40'}`}>
           {tourPlaying ? '■' : '▶'}
         </button>
       )}
 
       {/* Color pickers */}
-      <div className="w-10 flex flex-col items-center gap-2 mt-2 mb-1 flex-shrink-0">
-        <ColorPicker value={strokeColor} onChange={setStrokeColor} title="Stroke color" swatchClassName="w-8 h-8 rounded-full border-2 border-white/30 cursor-pointer shadow-md" />
-        <ColorPicker value={fillColor} onChange={setFillColor} title="Fill color" swatchClassName="w-6 h-6 rounded border-2 border-white/30 cursor-pointer shadow" showFillToggle onClearFill={() => setFillColor(fillColor === 'none' ? '#ffffff' : 'none')} />
+      <div className="w-11 flex flex-col items-center gap-2 mt-2 mb-1 flex-shrink-0">
+        <ColorPicker value={strokeColor} onChange={setStrokeColor} title="Stroke color" swatchClassName="w-8 h-8 rounded-full border-2 border-white/30 cursor-pointer shadow-md touch-manipulation" />
+        <ColorPicker value={fillColor} onChange={setFillColor} title="Fill color" swatchClassName="w-7 h-7 rounded border-2 border-white/30 cursor-pointer shadow touch-manipulation" showFillToggle onClearFill={() => setFillColor(fillColor === 'none' ? '#ffffff' : 'none')} />
       </div>
 
       {/* Stroke width */}
-      <div className="w-10 flex flex-col items-center gap-1 mb-2 flex-shrink-0" title="Stroke width">
+      <div className="w-11 flex flex-col items-center gap-1 mb-2 flex-shrink-0" title="Stroke width">
         <div className="w-6 rounded-full bg-white/60" style={{ height: `${Math.max(2, Math.min(12, strokeWidth))}px` }} />
-        <input type="range" min="1" max="20" value={strokeWidth} onChange={e => setStrokeWidth(Number(e.target.value))} className="w-10 accent-accent" style={{ writingMode: 'vertical-lr', direction: 'rtl', height: '60px' }} />
+        <input type="range" min="1" max="20" value={strokeWidth} onChange={e => setStrokeWidth(Number(e.target.value))}
+          className="accent-accent touch-manipulation"
+          style={{ writingMode: 'vertical-lr', direction: 'rtl', height: '60px' }} />
       </div>
     </div>
   );

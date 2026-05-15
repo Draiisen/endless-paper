@@ -79,6 +79,8 @@ export default function App({ initialState, settings }: AppProps) {
   const [projectSizeMB, setProjectSizeMB] = useState(0);
   const [lodProcessingCount, setLodProcessingCount] = useState(0);
   const [shareFlash, setShareFlash] = useState<'copied' | 'toobig' | null>(null);
+  const [toolbarCollapsed, setToolbarCollapsed] = useState(() => window.innerWidth < 640);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
 
   const { popup, handleNodeClick, dismiss: dismissPopup } = useHotspotHandler(viewerMode);
 
@@ -842,83 +844,169 @@ export default function App({ initialState, settings }: AppProps) {
         hasCameras={(scene.cameras?.length ?? 0) > 0}
         onPlayTour={handlePlayTour}
         tourPlaying={tourPlaying}
+        collapsed={toolbarCollapsed}
+        onToggleCollapsed={() => setToolbarCollapsed(v => !v)}
       />
 
       {/* Top bar */}
-      <div className="fixed top-0 left-14 right-0 h-11 bg-ink/90 backdrop-blur-sm flex items-center px-4 gap-2 z-10">
-        <span className="text-accent font-semibold text-sm hidden sm:block">✏ Endless Paper</span>
-        <div className="w-px h-5 bg-white/20 hidden sm:block" />
+      {(() => {
+        const tbLeft = toolbarCollapsed ? 'left-9' : 'left-14';
+        return (
+          <div className={`fixed top-0 ${tbLeft} right-0 h-12 bg-ink/95 backdrop-blur-sm flex items-center px-3 gap-1.5 z-10`}>
 
-        {/* Breadcrumb */}
-        <div className="flex items-center gap-1 flex-1 overflow-x-auto scrollbar-none">
-          {sceneStack.map((entry, i) => (
-            <React.Fragment key={i}>
-              {i > 0 && <span className="text-gray-500 text-xs flex-shrink-0">›</span>}
-              <button
-                className={`text-xs px-2 py-1 rounded flex-shrink-0 transition-colors ${i === sceneStack.length - 1 ? 'text-white font-medium' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}
-                onClick={() => navigateTo(i)}
-                disabled={i === sceneStack.length - 1}
-              >{entry.label}</button>
-            </React.Fragment>
-          ))}
+            {/* Desktop title — hidden on mobile */}
+            <span className="text-accent font-semibold text-sm hidden sm:block flex-shrink-0">✏ Endless Paper</span>
+            <div className="w-px h-5 bg-white/20 hidden sm:block flex-shrink-0" />
+
+            {/* Breadcrumb */}
+            <div className="flex items-center gap-0.5 flex-1 overflow-x-auto scrollbar-none min-w-0">
+              {sceneStack.map((entry, i) => (
+                <React.Fragment key={i}>
+                  {i > 0 && <span className="text-gray-600 text-xs flex-shrink-0">›</span>}
+                  <button
+                    className={`text-xs px-2 py-2 rounded flex-shrink-0 transition-colors touch-manipulation ${i === sceneStack.length - 1 ? 'text-white font-medium' : 'text-gray-400 active:text-white hover:text-white hover:bg-white/10'}`}
+                    onClick={() => navigateTo(i)}
+                    disabled={i === sceneStack.length - 1}
+                  >{entry.label}</button>
+                </React.Fragment>
+              ))}
+            </div>
+
+            {/* Status indicators — compact */}
+            {lodProcessingCount > 0 && <span className="text-[10px] text-gray-400 flex-shrink-0 animate-pulse hidden sm:block">⚙</span>}
+            {autoSaveFailed && <span className="text-[10px] text-red-400 flex-shrink-0 hidden sm:block">!</span>}
+            {showSavedFlash && !autoSaveFailed && <span className="text-[10px] text-accent flex-shrink-0">✓</span>}
+
+            {/* View/Edit mode toggle — always visible */}
+            <button
+              onClick={() => setViewerMode(v => !v)}
+              className={`px-2.5 py-1.5 rounded text-xs font-semibold transition-colors flex-shrink-0 touch-manipulation ${viewerMode ? 'bg-accent text-white' : 'text-gray-300 active:text-white border border-white/20'}`}
+              title="Toggle viewer mode (hotspots active)"
+            >{viewerMode ? '▶' : '✎'}</button>
+
+            {/* Undo / Redo — always visible */}
+            <button className={`p-2 rounded transition-colors touch-manipulation flex-shrink-0 ${history.canUndo ? 'text-gray-300 active:text-white hover:text-white hover:bg-white/10' : 'text-gray-700 cursor-not-allowed'}`} onClick={handleUndo} disabled={!history.canUndo} title="Undo">
+              <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current"><path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"/></svg>
+            </button>
+            <button className={`p-2 rounded transition-colors touch-manipulation flex-shrink-0 ${history.canRedo ? 'text-gray-300 active:text-white hover:text-white hover:bg-white/10' : 'text-gray-700 cursor-not-allowed'}`} onClick={handleRedo} disabled={!history.canRedo} title="Redo">
+              <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current"><path d="M18.4 10.6C16.55 8.99 14.15 8 11.5 8c-4.65 0-8.58 3.03-9.96 7.22L3.9 16c1.05-3.19 4.05-5.5 7.6-5.5 1.95 0 3.73.72 5.12 1.88L13 16h9V7l-3.6 3.6z"/></svg>
+            </button>
+
+            {/* Zoom — desktop only */}
+            <span className="text-xs font-mono text-accent min-w-[44px] text-right flex-shrink-0 hidden sm:block">{zoomPercent}%</span>
+
+            {/* Desktop file buttons — hidden on mobile */}
+            <div className="hidden sm:flex items-center gap-1 flex-shrink-0">
+              {singleSelection && (
+                <button onClick={() => setShowProperties(v => !v)} title="Properties" className={`p-1.5 rounded text-xs transition-colors ${showProperties ? 'bg-accent text-white' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}>⚙</button>
+              )}
+              <button onClick={() => setAudioMuted(m => !m)} className="p-1.5 rounded text-gray-400 hover:text-white hover:bg-white/10 transition-colors">{audioMuted ? '🔇' : '🔊'}</button>
+              <button onClick={handleSetStartCamera} className="px-2 py-1 rounded text-xs text-gray-400 hover:text-white hover:bg-white/10 transition-colors">🎯</button>
+              {getRootScene().startCamera && <button onClick={handleResetToStart} className="px-2 py-1 rounded text-xs text-gray-400 hover:text-white hover:bg-white/10 transition-colors">⟳</button>}
+              <div className="w-px h-4 bg-white/20 mx-1" />
+              <button onClick={handleNew} className="px-2 py-1 rounded text-xs text-gray-300 hover:text-white hover:bg-white/10 transition-colors">New</button>
+              <button onClick={handleManualSave} className="px-2 py-1 rounded text-xs text-gray-300 hover:text-white hover:bg-white/10 transition-colors">Save</button>
+              <button onClick={handleLoad} className="px-2 py-1 rounded text-xs text-gray-300 hover:text-white hover:bg-white/10 transition-colors">Load</button>
+              <button onClick={() => setShowSaves(true)} className="px-2 py-1 rounded text-xs text-gray-300 hover:text-white hover:bg-white/10 transition-colors">Saves</button>
+              <button onClick={() => setShowExport(true)} className="px-3 py-1.5 rounded-lg bg-accent text-white text-xs font-semibold hover:bg-accent/80 transition-colors">Export</button>
+              <button onClick={handleShare} className="px-2 py-1 rounded text-xs text-gray-300 hover:text-white hover:bg-white/10 transition-colors">
+                {shareFlash === 'copied' ? '✓' : shareFlash === 'toobig' ? '!' : 'Share'}
+              </button>
+            </div>
+
+            {/* Mobile overflow menu button */}
+            <button
+              className="sm:hidden p-2 rounded text-gray-300 active:text-white active:bg-white/10 flex-shrink-0 touch-manipulation text-lg leading-none"
+              onClick={() => setShowMobileMenu(v => !v)}
+              title="More"
+            >⋮</button>
+          </div>
+        );
+      })()}
+
+      {/* Mobile overflow menu */}
+      {showMobileMenu && (
+        <div className="sm:hidden fixed inset-0 z-40" onClick={() => setShowMobileMenu(false)}>
+          <div
+            className="absolute right-0 top-12 bg-ink/98 border-l border-b border-white/10 rounded-bl-2xl shadow-2xl p-4 flex flex-col gap-3 min-w-[220px]"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Zoom display */}
+            <div className="flex items-center justify-between">
+              <span className="text-gray-400 text-xs">Zoom</span>
+              <span className="text-accent font-mono text-sm">{zoomPercent}%</span>
+            </div>
+
+            {/* Status */}
+            {lodProcessingCount > 0 && <span className="text-[11px] text-gray-400 animate-pulse">⚙ Vectorizing…</span>}
+            {autoSaveFailed && <span className="text-[11px] text-red-400">⚠ Auto-save failed — use Save</span>}
+            {projectSizeMB > 5 && <span className={`text-[11px] ${projectSizeMB > 15 ? 'text-orange-400' : 'text-yellow-400/80'}`}>Size: {projectSizeMB.toFixed(1)} MB</span>}
+
+            <div className="h-px bg-white/10" />
+
+            {/* Selection actions */}
+            {singleSelection && (
+              <button onClick={() => { setShowProperties(v => !v); setShowMobileMenu(false); }}
+                className={`flex items-center gap-3 px-3 py-3 rounded-lg text-sm touch-manipulation ${showProperties ? 'bg-accent/20 text-accent' : 'text-gray-200 active:bg-white/10'}`}>
+                <span>⚙</span><span>Properties</span>
+              </button>
+            )}
+
+            {/* Mode & audio */}
+            <button onClick={() => { setViewerMode(v => !v); setShowMobileMenu(false); }}
+              className={`flex items-center gap-3 px-3 py-3 rounded-lg text-sm touch-manipulation ${viewerMode ? 'bg-accent/20 text-accent' : 'text-gray-200 active:bg-white/10'}`}>
+              <span>{viewerMode ? '▶' : '✎'}</span><span>{viewerMode ? 'Viewer mode ON' : 'Edit mode'}</span>
+            </button>
+
+            <button onClick={() => setAudioMuted(m => !m)}
+              className="flex items-center gap-3 px-3 py-3 rounded-lg text-sm text-gray-200 active:bg-white/10 touch-manipulation">
+              <span>{audioMuted ? '🔇' : '🔊'}</span><span>{audioMuted ? 'Unmute' : 'Mute audio'}</span>
+            </button>
+
+            <div className="h-px bg-white/10" />
+
+            {/* Camera */}
+            <button onClick={() => { handleSetStartCamera(); setShowMobileMenu(false); }}
+              className="flex items-center gap-3 px-3 py-3 rounded-lg text-sm text-gray-200 active:bg-white/10 touch-manipulation">
+              <span>🎯</span><span>Set start point</span>
+            </button>
+            {getRootScene().startCamera && (
+              <button onClick={() => { handleResetToStart(); setShowMobileMenu(false); }}
+                className="flex items-center gap-3 px-3 py-3 rounded-lg text-sm text-gray-200 active:bg-white/10 touch-manipulation">
+                <span>⟳</span><span>Reset to start</span>
+              </button>
+            )}
+
+            <div className="h-px bg-white/10" />
+
+            {/* File ops */}
+            <button onClick={() => { handleNew(); setShowMobileMenu(false); }}
+              className="flex items-center gap-3 px-3 py-3 rounded-lg text-sm text-gray-200 active:bg-white/10 touch-manipulation">
+              <span>📄</span><span>New canvas</span>
+            </button>
+            <button onClick={() => { handleManualSave(); setShowMobileMenu(false); }}
+              className="flex items-center gap-3 px-3 py-3 rounded-lg text-sm text-gray-200 active:bg-white/10 touch-manipulation">
+              <span>💾</span><span>Save file</span>
+            </button>
+            <button onClick={() => { handleLoad(); setShowMobileMenu(false); }}
+              className="flex items-center gap-3 px-3 py-3 rounded-lg text-sm text-gray-200 active:bg-white/10 touch-manipulation">
+              <span>📂</span><span>Load file</span>
+            </button>
+            <button onClick={() => { setShowSaves(true); setShowMobileMenu(false); }}
+              className="flex items-center gap-3 px-3 py-3 rounded-lg text-sm text-gray-200 active:bg-white/10 touch-manipulation">
+              <span>🗂</span><span>Saved files</span>
+            </button>
+            <button onClick={() => { setShowExport(true); setShowMobileMenu(false); }}
+              className="flex items-center gap-3 px-3 py-3 rounded-xl bg-accent/20 text-accent text-sm font-semibold active:bg-accent/40 touch-manipulation">
+              <span>⬆</span><span>Export</span>
+            </button>
+            <button onClick={() => { handleShare(); setShowMobileMenu(false); }}
+              className="flex items-center gap-3 px-3 py-3 rounded-lg text-sm text-gray-200 active:bg-white/10 touch-manipulation">
+              <span>🔗</span><span>{shareFlash === 'copied' ? '✓ Link copied!' : shareFlash === 'toobig' ? 'Too large' : 'Copy share link'}</span>
+            </button>
+          </div>
         </div>
-
-        {lodProcessingCount > 0 && <span className="text-[10px] text-gray-400 flex-shrink-0 animate-pulse">⚙ Vectorizing…</span>}
-        {projectSizeMB > 15 && <span className="text-[10px] text-orange-400 flex-shrink-0" title="Project is large — export a backup">⚠ {projectSizeMB.toFixed(0)} MB</span>}
-        {projectSizeMB > 5 && projectSizeMB <= 15 && <span className="text-[10px] text-yellow-400/80 flex-shrink-0">{projectSizeMB.toFixed(1)} MB</span>}
-        {autoSaveFailed && <span className="text-[10px] text-red-400">Auto-save failed: canvas too large. Use File &gt; Save to export.</span>}
-        {showSavedFlash && !autoSaveFailed && <span className="text-[10px] text-accent">Saved</span>}
-
-        {/* Start camera */}
-        <button onClick={handleSetStartCamera} title="Set as start point for export" className="px-2 py-1 rounded text-xs text-gray-400 hover:text-white hover:bg-white/10 transition-colors flex-shrink-0">
-          🎯
-        </button>
-        {getRootScene().startCamera && (
-          <button onClick={handleResetToStart} title="Reset to start camera" className="px-2 py-1 rounded text-xs text-gray-400 hover:text-white hover:bg-white/10 transition-colors flex-shrink-0">
-            ⟳
-          </button>
-        )}
-
-        {/* Viewer/edit mode toggle */}
-        <button
-          onClick={() => setViewerMode(v => !v)}
-          className={`px-2 py-1 rounded text-xs font-semibold transition-colors flex-shrink-0 ${viewerMode ? 'bg-accent text-white' : 'text-gray-400 hover:text-white border border-white/10'}`}
-          title="Toggle viewer mode (hotspots active)"
-        >
-          {viewerMode ? '▶ View' : '✎ Edit'}
-        </button>
-
-        {/* Audio mute */}
-        <button onClick={() => setAudioMuted(m => !m)} title={audioMuted ? 'Unmute' : 'Mute'} className="p-1.5 rounded text-gray-400 hover:text-white hover:bg-white/10 transition-colors flex-shrink-0">
-          {audioMuted ? '🔇' : '🔊'}
-        </button>
-
-        {/* Properties panel toggle */}
-        {singleSelection && (
-          <button onClick={() => setShowProperties(v => !v)} title="Node properties" className={`p-1.5 rounded text-xs transition-colors flex-shrink-0 ${showProperties ? 'bg-accent text-white' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}>
-            ⚙
-          </button>
-        )}
-
-        {/* Undo / Redo */}
-        <button className={`p-1.5 rounded transition-colors ${history.canUndo ? 'text-gray-300 hover:text-white hover:bg-white/10' : 'text-gray-600 cursor-not-allowed'}`} onClick={handleUndo} disabled={!history.canUndo} title="Undo (Ctrl+Z)">
-          <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current"><path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"/></svg>
-        </button>
-        <button className={`p-1.5 rounded transition-colors ${history.canRedo ? 'text-gray-300 hover:text-white hover:bg-white/10' : 'text-gray-600 cursor-not-allowed'}`} onClick={handleRedo} disabled={!history.canRedo} title="Redo (Ctrl+Y)">
-          <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current"><path d="M18.4 10.6C16.55 8.99 14.15 8 11.5 8c-4.65 0-8.58 3.03-9.96 7.22L3.9 16c1.05-3.19 4.05-5.5 7.6-5.5 1.95 0 3.73.72 5.12 1.88L13 16h9V7l-3.6 3.6z"/></svg>
-        </button>
-
-        <span className="text-xs font-mono text-accent min-w-[52px] text-right">{zoomPercent}%</span>
-
-        <button onClick={handleNew} className="px-2 py-1 rounded text-xs text-gray-300 hover:text-white hover:bg-white/10 transition-colors">New</button>
-        <button onClick={handleManualSave} title="Ctrl+S" className="px-2 py-1 rounded text-xs text-gray-300 hover:text-white hover:bg-white/10 transition-colors">Save</button>
-        <button onClick={handleLoad} className="px-2 py-1 rounded text-xs text-gray-300 hover:text-white hover:bg-white/10 transition-colors">Load</button>
-        <button onClick={() => setShowSaves(true)} title="Save management" className="px-2 py-1 rounded text-xs text-gray-300 hover:text-white hover:bg-white/10 transition-colors">Saves</button>
-        <button onClick={() => setShowExport(true)} title="Ctrl+E" className="ml-1 px-3 py-1.5 rounded-lg bg-accent text-white text-xs font-semibold hover:bg-accent/80 transition-colors">Export</button>
-        <button onClick={handleShare} title="Copy share link to clipboard" className="px-2 py-1 rounded text-xs text-gray-300 hover:text-white hover:bg-white/10 transition-colors">
-          {shareFlash === 'copied' ? '✓ Copied!' : shareFlash === 'toobig' ? 'Too large' : 'Share'}
-        </button>
-      </div>
+      )}
 
       {/* Back button */}
       {sceneStack.length > 1 && (
@@ -931,13 +1019,13 @@ export default function App({ initialState, settings }: AppProps) {
 
       {/* Right panels */}
       {showLibrary && (
-        <div className="fixed right-0 top-11 bottom-0 w-56 bg-ink/95 border-l border-white/10 overflow-y-auto z-10 p-3">
+        <div className="fixed right-0 top-12 bottom-0 w-56 bg-ink/95 border-l border-white/10 overflow-y-auto z-10 p-3">
           <AssetLibrary assets={assets} onDelete={handleDeleteAsset} onBeginPlace={handlePlaceAsset} />
         </div>
       )}
 
       {showLayers && !showLibrary && (
-        <div className="fixed right-0 top-11 bottom-0 w-56 bg-ink/95 border-l border-white/10 overflow-y-auto z-10 p-3">
+        <div className="fixed right-0 top-12 bottom-0 w-56 bg-ink/95 border-l border-white/10 overflow-y-auto z-10 p-3">
           <LayersPanel
             layers={sceneLayers}
             activeLayerId={activeLayerId}

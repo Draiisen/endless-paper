@@ -31,7 +31,7 @@ export function PropertiesPanel({ node, sceneCatalog, onUpdate, onAddAudio, curr
   };
 
   return (
-    <div className="fixed right-0 top-11 bottom-0 w-64 bg-ink/95 border-l border-white/10 text-white text-xs overflow-y-auto z-10 flex flex-col">
+    <div className="fixed right-0 top-12 bottom-0 w-64 bg-ink/95 border-l border-white/10 text-white text-xs overflow-y-auto z-10 flex flex-col">
       <div className="flex border-b border-white/10 flex-shrink-0">
         {tabs.map(tab => (
           <button
