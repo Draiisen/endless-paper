@@ -15,6 +15,9 @@ import { exportToFile, importFromFile, clearLocalStorage, saveSettings, AppSetti
 import { saveToIDB, clearIDB } from './engine/idb-store';
 import { generateThumbnail, requestColorVectorization } from './engine/lod-manager';
 import { audioManager } from './engine/audio-manager';
+import { WelcomeModal } from './components/WelcomeModal';
+import { HelpPanel } from './components/HelpPanel';
+import { createTemplate, TemplateName } from './engine/templates';
 
 function makeInitialViewport(): Viewport {
   return { x: window.innerWidth / 2 - 200, y: window.innerHeight / 2 - 150, scale: 1 };
@@ -81,6 +84,8 @@ export default function App({ initialState, settings }: AppProps) {
   const [shareFlash, setShareFlash] = useState<'copied' | 'toobig' | null>(null);
   const [toolbarCollapsed, setToolbarCollapsed] = useState(() => window.innerWidth < 640);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
+  const [showWelcome, setShowWelcome] = useState(() => !localStorage.getItem('ep_welcomed_v1'));
+  const [showHelp, setShowHelp] = useState(false);
 
   const { popup, handleNodeClick, dismiss: dismissPopup } = useHotspotHandler(viewerMode);
 
@@ -651,6 +656,14 @@ export default function App({ initialState, settings }: AppProps) {
     setTool('select');
   }, [viewport, activeLayerId, setScene, handleSceneChange, applyLodResult]);
 
+  const loadTemplate = useCallback((name: TemplateName) => {
+    const cx = (window.innerWidth / 2 - viewport.x) / viewport.scale;
+    const cy = (window.innerHeight / 2 - viewport.y) / viewport.scale;
+    const newScene = createTemplate(name, cx, cy);
+    setScene(newScene);
+    handleSceneChange(newScene, viewport);
+  }, [viewport, setScene, handleSceneChange]);
+
   // Minimap teleport
   const handleMiniMapTeleport = useCallback((worldX: number, worldY: number) => {
     const vp = viewportRef.current;
@@ -912,6 +925,7 @@ export default function App({ initialState, settings }: AppProps) {
               <button onClick={handleShare} className="px-2 py-1 rounded text-xs text-gray-300 hover:text-white hover:bg-white/10 transition-colors">
                 {shareFlash === 'copied' ? '✓' : shareFlash === 'toobig' ? '!' : 'Share'}
               </button>
+              <button onClick={() => setShowHelp(true)} className="p-1.5 rounded text-gray-400 hover:text-white hover:bg-white/10 transition-colors" title="Aide">?</button>
             </div>
 
             {/* Mobile overflow menu button */}
@@ -1003,6 +1017,11 @@ export default function App({ initialState, settings }: AppProps) {
             <button onClick={() => { handleShare(); setShowMobileMenu(false); }}
               className="flex items-center gap-3 px-3 py-3 rounded-lg text-sm text-gray-200 active:bg-white/10 touch-manipulation">
               <span>🔗</span><span>{shareFlash === 'copied' ? '✓ Link copied!' : shareFlash === 'toobig' ? 'Too large' : 'Copy share link'}</span>
+            </button>
+            <div className="h-px bg-white/10" />
+            <button onClick={() => { setShowHelp(true); setShowMobileMenu(false); }}
+              className="flex items-center gap-3 px-3 py-3 rounded-lg text-sm text-gray-200 active:bg-white/10 touch-manipulation">
+              <span>❓</span><span>Guide & raccourcis</span>
             </button>
           </div>
         </div>
@@ -1122,15 +1141,33 @@ export default function App({ initialState, settings }: AppProps) {
       {/* Empty canvas onboarding hint */}
       {scene.nodes.length === 0 && sceneStack.length === 1 && !viewerMode && (
         <div className="fixed inset-0 flex items-center justify-center z-0 pointer-events-none select-none">
-          <div className="flex flex-col items-center gap-4 text-center px-8 opacity-40">
-            <div className="text-6xl">✏</div>
-            <p className="text-gray-500 text-base font-medium">Commence à dessiner</p>
-            <div className="flex flex-col gap-1.5 text-gray-500 text-sm">
-              <span>✎ &nbsp;Sélectionne un outil à gauche</span>
-              <span>👆 &nbsp;Dessine sur le canvas</span>
-              <span>🔍 &nbsp;Pince pour zoomer</span>
-              <span>⬡ &nbsp;Double-tape une forme pour entrer dedans</span>
+          <div className="flex flex-col items-center gap-5 text-center px-6 opacity-70">
+            <p className="text-gray-400 text-sm font-medium">Choisissez un point de départ</p>
+            <div className="flex gap-3 pointer-events-auto">
+              {([
+                { key: 'blank', icon: '⬜', label: 'Vierge', desc: 'Canvas vide', color: '#64748b' },
+                { key: 'mindmap', icon: '🧠', label: 'Carte mentale', desc: 'Centre + branches', color: '#6c63ff' },
+                { key: 'storyboard', icon: '🎬', label: 'Storyboard', desc: '4 panneaux', color: '#22c55e' },
+              ] as const).map(t => (
+                <button
+                  key={t.key}
+                  onClick={() => { if (t.key !== 'blank') loadTemplate(t.key as TemplateName); }}
+                  className="flex flex-col items-center gap-1.5 w-24 py-3 px-2 rounded-xl border transition-all touch-manipulation active:scale-95"
+                  style={{ borderColor: `${t.color}40`, backgroundColor: `${t.color}10` }}
+                >
+                  <span className="text-2xl">{t.icon}</span>
+                  <span className="text-white text-xs font-semibold">{t.label}</span>
+                  <span className="text-gray-500 text-[10px]">{t.desc}</span>
+                </button>
+              ))}
             </div>
+            <p className="text-gray-600 text-xs">ou dessinez directement sur le canvas</p>
+            <button
+              className="text-gray-500 text-xs underline pointer-events-auto touch-manipulation"
+              onClick={() => setShowHelp(true)}
+            >
+              Comment ça marche ?
+            </button>
           </div>
         </div>
       )}
@@ -1150,6 +1187,15 @@ export default function App({ initialState, settings }: AppProps) {
           onRestore={handleRestoreFromSave}
         />
       )}
+
+      {showWelcome && (
+        <WelcomeModal onClose={() => {
+          localStorage.setItem('ep_welcomed_v1', '1');
+          setShowWelcome(false);
+        }} />
+      )}
+
+      {showHelp && <HelpPanel onClose={() => setShowHelp(false)} />}
     </div>
   );
 }
