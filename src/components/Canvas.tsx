@@ -823,7 +823,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
       if (ratio > 1.5) {
         autoCandidate = node;
         break;
-      } else if (ratio > 0.5) {
+      } else if (ratio > 0.25) {
         hintCandidate = node;
       }
     }
@@ -1116,32 +1116,45 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
       />
 
       {textEdit && (
-        <textarea
-          autoFocus
-          className="fixed z-40 resize-none bg-white/95 border-2 border-accent rounded shadow-lg px-2 py-1 outline-none"
-          style={{
-            left: textEdit.screenX,
-            top: textEdit.screenY,
-            fontSize: `${textEdit.fontSize}px`,
-            fontFamily: 'system-ui, sans-serif',
-            color: strokeColor,
-            minWidth: 80,
-            minHeight: 24,
-          }}
-          value={textEdit.value}
-          onChange={(e) => setTextEdit({ ...textEdit, value: e.target.value })}
-          onKeyDown={(e) => {
-            if (e.key === 'Escape') {
-              e.preventDefault();
-              setTextEdit(null);
-              setTool('select');
-            } else if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              commitTextEdit();
-            }
-          }}
-          onBlur={commitTextEdit}
-        />
+        <div
+          className="fixed z-40 flex flex-col gap-1"
+          style={{ left: textEdit.screenX, top: Math.max(4, textEdit.screenY - 36) }}
+        >
+          {/* Font size picker */}
+          <div className="flex gap-1 bg-ink/90 rounded-lg px-2 py-1 shadow-lg border border-white/10 self-start">
+            {[12, 18, 24, 36, 48, 64].map(s => (
+              <button
+                key={s}
+                className={`px-1.5 py-0.5 rounded text-[11px] font-mono touch-manipulation transition-colors ${textEdit.fontSize === s ? 'bg-accent text-white' : 'text-gray-300 hover:text-white active:text-white'}`}
+                onMouseDown={e => { e.preventDefault(); setTextEdit(t => t ? { ...t, fontSize: s } : t); }}
+              >{s}</button>
+            ))}
+          </div>
+          <textarea
+            autoFocus
+            className="resize-none bg-white/95 border-2 border-accent rounded shadow-lg px-2 py-1 outline-none"
+            style={{
+              fontSize: `${textEdit.fontSize}px`,
+              fontFamily: 'system-ui, sans-serif',
+              color: strokeColor,
+              minWidth: 80,
+              minHeight: 24,
+            }}
+            value={textEdit.value}
+            onChange={(e) => setTextEdit({ ...textEdit, value: e.target.value })}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                setTextEdit(null);
+                setTool('select');
+              } else if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                commitTextEdit();
+              }
+            }}
+            onBlur={commitTextEdit}
+          />
+        </div>
       )}
     </>
   );

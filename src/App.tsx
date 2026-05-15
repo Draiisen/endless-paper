@@ -1106,6 +1106,22 @@ export default function App({ initialState, settings }: AppProps) {
       {/* Hotspot popup */}
       <PopupDisplay popup={popup} onDismiss={dismissPopup} />
 
+      {/* Empty canvas onboarding hint */}
+      {scene.nodes.length === 0 && sceneStack.length === 1 && !viewerMode && (
+        <div className="fixed inset-0 flex items-center justify-center z-0 pointer-events-none select-none">
+          <div className="flex flex-col items-center gap-4 text-center px-8 opacity-40">
+            <div className="text-6xl">✏</div>
+            <p className="text-gray-500 text-base font-medium">Commence à dessiner</p>
+            <div className="flex flex-col gap-1.5 text-gray-500 text-sm">
+              <span>✎ &nbsp;Sélectionne un outil à gauche</span>
+              <span>👆 &nbsp;Dessine sur le canvas</span>
+              <span>🔍 &nbsp;Pince pour zoomer</span>
+              <span>⬡ &nbsp;Double-tape une forme pour entrer dedans</span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showExport && (
         <ExportModal
           state={{ version: 1, rootScene: rootSceneRef.current, viewport: viewportRef.current, savedAt: Date.now(), assets: assetsRef.current }}

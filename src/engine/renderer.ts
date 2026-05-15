@@ -382,7 +382,7 @@ function drawNode(
 
   // Inner scene preview
   if (node.innerScene && node.innerScene.nodes.length > 0) {
-    drawInnerScenePreview(ctx, node);
+    drawInnerScenePreview(ctx, node, viewportScale);
   }
 
   if (showEnterHint && !viewerMode) {
@@ -694,21 +694,30 @@ function drawGroupOutline(ctx: CanvasRenderingContext2D, node: SceneNode): void 
   ctx.setLineDash([]);
 }
 
-function drawInnerScenePreview(ctx: CanvasRenderingContext2D, node: SceneNode): void {
+function drawInnerScenePreview(ctx: CanvasRenderingContext2D, node: SceneNode, viewportScale: number): void {
   ctx.save();
-  ctx.strokeStyle = 'rgba(74, 144, 217, 0.3)';
+  ctx.strokeStyle = 'rgba(74, 144, 217, 0.55)';
   ctx.lineWidth = 2;
-  ctx.setLineDash([3, 3]);
+  ctx.setLineDash([4, 3]);
   ctx.strokeRect(node.x, node.y, node.width, node.height);
   ctx.setLineDash([]);
 
-  const iconSize = Math.min(16, node.width * 0.1, node.height * 0.1);
-  if (iconSize > 4) {
-    ctx.fillStyle = 'rgba(74, 144, 217, 0.5)';
-    ctx.font = `${iconSize}px sans-serif`;
+  // Badge "⬡ enter" — always visible if node is big enough on screen
+  const screenW = node.width * viewportScale;
+  if (screenW > 30) {
+    const iconSize = Math.max(9, Math.min(14, screenW * 0.06));
+    ctx.fillStyle = 'rgba(74, 144, 217, 0.85)';
+    ctx.font = `bold ${iconSize}px sans-serif`;
     ctx.textAlign = 'right';
     ctx.textBaseline = 'top';
-    ctx.fillText('⬡', node.x + node.width - 2, node.y + 2);
+    ctx.fillText('⬡', node.x + node.width - 3, node.y + 3);
+    // Show label if large enough
+    if (screenW > 80) {
+      ctx.font = `${Math.max(8, iconSize * 0.85)}px sans-serif`;
+      ctx.fillStyle = 'rgba(74, 144, 217, 0.65)';
+      ctx.textAlign = 'left';
+      ctx.fillText('double-tap to enter', node.x + 4, node.y + node.height - iconSize - 3);
+    }
   }
   ctx.restore();
 }

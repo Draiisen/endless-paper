@@ -153,9 +153,6 @@ export function Toolbar({
         <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
       </ToolButton>
 
-      <ToolButton active={tool === 'stamp'} onClick={() => setTool('stamp')} title="Stamp brush">
-        <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current"><path d="M21 17H3v2h18v-2zm-9-10c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zM8 8c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm8 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm-4-6C7.93 2 4.6 5.12 4.6 9H3v2h2.07c.22.84.6 1.63 1.1 2.31L5.1 14.38 6.52 15.8l1.07-1.07C8.27 15.22 9.1 15.6 10 15.83V17h4v-1.17c.9-.23 1.73-.61 2.41-1.1l1.07 1.07 1.42-1.42-1.07-1.07c.5-.68.88-1.47 1.1-2.31H21V9h-1.6C19.4 5.12 16.07 2 12 2z"/></svg>
-      </ToolButton>
 
       {canVectorize && (
         <ToolButton active={false} onClick={onVectorize} title="Vectorize image">
