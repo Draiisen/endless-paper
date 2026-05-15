@@ -1,0 +1,14 @@
+node_modules/
+.vite/
+dist/
+src/
+*.ts
+*.json
+!index.html
+!manifest.json
+!sw.js
+package*.json
+vite.config.*
+tailwind.config.*
+postcss.config.*
+tsconfig.*
