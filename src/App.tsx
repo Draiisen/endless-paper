@@ -1019,22 +1019,34 @@ export default function App({ initialState, settings }: AppProps) {
 
       {/* Right panels */}
       {showLibrary && (
-        <div className="fixed right-0 top-12 bottom-0 w-56 bg-ink/95 border-l border-white/10 overflow-y-auto z-10 p-3">
-          <AssetLibrary assets={assets} onDelete={handleDeleteAsset} onBeginPlace={handlePlaceAsset} />
+        <div className="fixed right-0 top-12 bottom-0 w-full sm:w-56 bg-ink/95 border-l border-white/10 overflow-y-auto z-10 flex flex-col">
+          <div className="flex items-center justify-between px-3 py-2 border-b border-white/10 flex-shrink-0">
+            <span className="text-white text-xs font-medium">Library</span>
+            <button onClick={() => setShowLibrary(false)} className="text-gray-500 active:text-white hover:text-white p-1 rounded touch-manipulation">✕</button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-3">
+            <AssetLibrary assets={assets} onDelete={handleDeleteAsset} onBeginPlace={handlePlaceAsset} />
+          </div>
         </div>
       )}
 
       {showLayers && !showLibrary && (
-        <div className="fixed right-0 top-12 bottom-0 w-56 bg-ink/95 border-l border-white/10 overflow-y-auto z-10 p-3">
-          <LayersPanel
-            layers={sceneLayers}
-            activeLayerId={activeLayerId}
-            setActiveLayerId={setActiveLayerId}
-            onAddLayer={handleAddLayer}
-            onDeleteLayer={handleDeleteLayer}
-            onUpdateLayer={handleUpdateLayer}
-            onReorderLayer={handleReorderLayer}
-          />
+        <div className="fixed right-0 top-12 bottom-0 w-full sm:w-56 bg-ink/95 border-l border-white/10 overflow-y-auto z-10 flex flex-col">
+          <div className="flex items-center justify-between px-3 py-2 border-b border-white/10 flex-shrink-0">
+            <span className="text-white text-xs font-medium">Layers</span>
+            <button onClick={() => setShowLayers(false)} className="text-gray-500 active:text-white hover:text-white p-1 rounded touch-manipulation">✕</button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-3">
+            <LayersPanel
+              layers={sceneLayers}
+              activeLayerId={activeLayerId}
+              setActiveLayerId={setActiveLayerId}
+              onAddLayer={handleAddLayer}
+              onDeleteLayer={handleDeleteLayer}
+              onUpdateLayer={handleUpdateLayer}
+              onReorderLayer={handleReorderLayer}
+            />
+          </div>
         </div>
       )}
 
@@ -1046,6 +1058,7 @@ export default function App({ initialState, settings }: AppProps) {
           onAddAudio={handleAddAudio}
           currentSceneAudio={scene.audio}
           onUpdateSceneAudio={handleUpdateSceneAudio}
+          onClose={() => setShowProperties(false)}
         />
       )}
 

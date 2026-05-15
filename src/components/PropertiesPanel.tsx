@@ -9,13 +9,14 @@ interface PropertiesPanelProps {
   onAddAudio: () => void;
   currentSceneAudio: SceneAudio | undefined;
   onUpdateSceneAudio: (audio: SceneAudio | undefined) => void;
+  onClose?: () => void;
 }
 
 const ANIM_TYPES: NodeAnimation['type'][] = ['pulse', 'wobble', 'float', 'fade'];
 
 type Tab = 'text' | 'image' | 'hotspot' | 'portal' | 'anim' | 'audio';
 
-export function PropertiesPanel({ node, sceneCatalog, onUpdate, onAddAudio, currentSceneAudio, onUpdateSceneAudio }: PropertiesPanelProps) {
+export function PropertiesPanel({ node, sceneCatalog, onUpdate, onAddAudio, currentSceneAudio, onUpdateSceneAudio, onClose }: PropertiesPanelProps) {
   const isText = node.type === 'text';
   const isImage = node.type === 'image';
   const [activeTab, setActiveTab] = useState<Tab>(isText ? 'text' : isImage ? 'image' : 'hotspot');
@@ -31,17 +32,24 @@ export function PropertiesPanel({ node, sceneCatalog, onUpdate, onAddAudio, curr
   };
 
   return (
-    <div className="fixed right-0 top-12 bottom-0 w-64 bg-ink/95 border-l border-white/10 text-white text-xs overflow-y-auto z-10 flex flex-col">
+    <div className="fixed right-0 top-12 bottom-0 w-full sm:w-64 bg-ink/95 border-l border-white/10 text-white text-xs overflow-y-auto z-10 flex flex-col">
       <div className="flex border-b border-white/10 flex-shrink-0">
         {tabs.map(tab => (
           <button
             key={tab}
-            className={`flex-1 py-2 text-[10px] uppercase tracking-wide transition-colors ${activeTab === tab ? 'text-accent border-b border-accent' : 'text-gray-500 hover:text-white'}`}
+            className={`flex-1 py-3 sm:py-2 text-xs sm:text-[10px] uppercase tracking-wide transition-colors touch-manipulation ${activeTab === tab ? 'text-accent border-b-2 border-accent' : 'text-gray-500 active:text-white hover:text-white'}`}
             onClick={() => setActiveTab(tab)}
           >
             {tabIcon[tab]}
           </button>
         ))}
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="px-3 py-3 sm:py-2 text-gray-500 active:text-white hover:text-white transition-colors touch-manipulation flex-shrink-0"
+            title="Close"
+          >✕</button>
+        )}
       </div>
 
       <div className="flex-1 p-3 flex flex-col gap-3">

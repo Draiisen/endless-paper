@@ -1118,7 +1118,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
       {textEdit && (
         <div
           className="fixed z-40 flex flex-col gap-1"
-          style={{ left: textEdit.screenX, top: Math.max(4, textEdit.screenY - 36) }}
+          style={{ left: textEdit.screenX, top: Math.max(56, textEdit.screenY - 36) }}
         >
           {/* Font size picker */}
           <div className="flex gap-1 bg-ink/90 rounded-lg px-2 py-1 shadow-lg border border-white/10 self-start">
@@ -1126,7 +1126,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
               <button
                 key={s}
                 className={`px-1.5 py-0.5 rounded text-[11px] font-mono touch-manipulation transition-colors ${textEdit.fontSize === s ? 'bg-accent text-white' : 'text-gray-300 hover:text-white active:text-white'}`}
-                onMouseDown={e => { e.preventDefault(); setTextEdit(t => t ? { ...t, fontSize: s } : t); }}
+                onPointerDown={e => { e.preventDefault(); setTextEdit(t => t ? { ...t, fontSize: s } : t); }}
               >{s}</button>
             ))}
           </div>
