@@ -75,6 +75,10 @@ export interface SceneNode {
   fontSize?: number;
   fontFamily?: string;
   color?: string;
+  fontWeight?: 'normal' | 'bold';
+  fontStyle?: 'normal' | 'italic';
+  textDecoration?: 'none' | 'underline';
+  textAlign?: 'left' | 'center' | 'right';
 
   // Optional shared group identity for multi-select grouping
   groupId?: string;

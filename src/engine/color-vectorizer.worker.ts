@@ -45,12 +45,24 @@ function kMeans(
     return { centroids: [], assignments: new Uint8Array(pixelCount) };
   }
 
-  // Random initialisation (from sample)
+  // k-means++ initialisation: spread centroids across color space for better coverage
   const centroids: RGB[] = [];
-  const used = new Set<number>();
+  centroids.push([...sample[Math.floor(Math.random() * sample.length)]] as RGB);
   while (centroids.length < Math.min(k, sample.length)) {
-    const idx = Math.floor(Math.random() * sample.length);
-    if (!used.has(idx)) { used.add(idx); centroids.push([...sample[idx]] as RGB); }
+    let totalDist = 0;
+    const dists = sample.map(p => {
+      let minD = Infinity;
+      for (const c of centroids) {
+        const d = (p[0]-c[0])**2 + (p[1]-c[1])**2 + (p[2]-c[2])**2;
+        if (d < minD) minD = d;
+      }
+      totalDist += minD;
+      return minD;
+    });
+    let r = Math.random() * totalDist;
+    let chosen = sample.length - 1;
+    for (let i = 0; i < dists.length; i++) { r -= dists[i]; if (r <= 0) { chosen = i; break; } }
+    centroids.push([...sample[chosen]] as RGB);
   }
 
   const assignments = new Uint8Array(pixelCount);

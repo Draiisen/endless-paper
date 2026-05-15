@@ -13,24 +13,38 @@ interface PropertiesPanelProps {
 
 const ANIM_TYPES: NodeAnimation['type'][] = ['pulse', 'wobble', 'float', 'fade'];
 
+type Tab = 'text' | 'hotspot' | 'portal' | 'anim' | 'audio';
+
 export function PropertiesPanel({ node, sceneCatalog, onUpdate, onAddAudio, currentSceneAudio, onUpdateSceneAudio }: PropertiesPanelProps) {
-  const [activeTab, setActiveTab] = useState<'hotspot' | 'portal' | 'anim' | 'audio'>('hotspot');
+  const isText = node.type === 'text';
+  const [activeTab, setActiveTab] = useState<Tab>(isText ? 'text' : 'hotspot');
+
+  const tabs: Tab[] = isText
+    ? ['text', 'hotspot', 'portal', 'anim', 'audio']
+    : ['hotspot', 'portal', 'anim', 'audio'];
+
+  const tabIcon: Record<Tab, string> = {
+    text: 'T', hotspot: '💬', portal: '🌀', anim: '✨', audio: '🔊',
+  };
 
   return (
     <div className="fixed right-0 top-11 bottom-0 w-64 bg-ink/95 border-l border-white/10 text-white text-xs overflow-y-auto z-10 flex flex-col">
       <div className="flex border-b border-white/10 flex-shrink-0">
-        {(['hotspot', 'portal', 'anim', 'audio'] as const).map(tab => (
+        {tabs.map(tab => (
           <button
             key={tab}
             className={`flex-1 py-2 text-[10px] uppercase tracking-wide transition-colors ${activeTab === tab ? 'text-accent border-b border-accent' : 'text-gray-500 hover:text-white'}`}
             onClick={() => setActiveTab(tab)}
           >
-            {tab === 'hotspot' ? '💬' : tab === 'portal' ? '🌀' : tab === 'anim' ? '✨' : '🔊'}
+            {tabIcon[tab]}
           </button>
         ))}
       </div>
 
       <div className="flex-1 p-3 flex flex-col gap-3">
+        {activeTab === 'text' && isText && (
+          <TextEditor node={node} onUpdate={onUpdate} />
+        )}
         {activeTab === 'hotspot' && (
           <HotspotEditor hotspot={node.hotspot} onChange={hs => onUpdate({ hotspot: hs })} />
         )}
@@ -43,6 +57,71 @@ export function PropertiesPanel({ node, sceneCatalog, onUpdate, onAddAudio, curr
         {activeTab === 'audio' && (
           <AudioEditor audio={currentSceneAudio} onUpdate={onUpdateSceneAudio} onAdd={onAddAudio} />
         )}
+      </div>
+    </div>
+  );
+}
+
+function TextEditor({ node, onUpdate }: { node: SceneNode; onUpdate: (u: Partial<SceneNode>) => void }) {
+  const isBold = node.fontWeight === 'bold';
+  const isItalic = node.fontStyle === 'italic';
+  const isUnderline = node.textDecoration === 'underline';
+  const align = node.textAlign ?? 'left';
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-1">
+        <span className="text-gray-400">Style</span>
+        <div className="flex gap-1">
+          <button onClick={() => onUpdate({ fontWeight: isBold ? 'normal' : 'bold' })}
+            className={`flex-1 py-1.5 rounded text-[13px] font-bold ${isBold ? 'bg-accent text-white' : 'bg-white/5 text-gray-400 hover:text-white'}`}>B</button>
+          <button onClick={() => onUpdate({ fontStyle: isItalic ? 'normal' : 'italic' })}
+            className={`flex-1 py-1.5 rounded text-[13px] italic ${isItalic ? 'bg-accent text-white' : 'bg-white/5 text-gray-400 hover:text-white'}`}>I</button>
+          <button onClick={() => onUpdate({ textDecoration: isUnderline ? 'none' : 'underline' })}
+            className={`flex-1 py-1.5 rounded text-[13px] underline ${isUnderline ? 'bg-accent text-white' : 'bg-white/5 text-gray-400 hover:text-white'}`}>U</button>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <span className="text-gray-400">Align</span>
+        <div className="flex gap-1">
+          {(['left', 'center', 'right'] as const).map(a => (
+            <button key={a} onClick={() => onUpdate({ textAlign: a })}
+              className={`flex-1 py-1.5 rounded text-[12px] ${align === a ? 'bg-accent text-white' : 'bg-white/5 text-gray-400 hover:text-white'}`}>
+              {a === 'left' ? '▤' : a === 'center' ? '▥' : '▦'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <span className="text-gray-400">Size <span className="text-gray-500">{node.fontSize ?? 16}px</span></span>
+        <input type="range" min={8} max={144} value={node.fontSize ?? 16}
+          onChange={e => onUpdate({ fontSize: Number(e.target.value) })}
+          className="accent-accent" />
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <span className="text-gray-400">Color</span>
+        <div className="flex items-center gap-2">
+          <input type="color" value={node.color ?? '#1a1a2e'}
+            onChange={e => onUpdate({ color: e.target.value })}
+            className="w-8 h-7 rounded border border-white/20 bg-transparent cursor-pointer" />
+          <span className="text-gray-500 text-[10px] font-mono">{node.color ?? '#1a1a2e'}</span>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <span className="text-gray-400">Font</span>
+        <select value={node.fontFamily ?? 'system-ui, sans-serif'}
+          onChange={e => onUpdate({ fontFamily: e.target.value })}
+          className="bg-ink/60 border border-white/10 rounded px-2 py-1 text-[11px] outline-none focus:border-accent/60">
+          <option value="system-ui, sans-serif">System UI</option>
+          <option value="Georgia, serif">Georgia</option>
+          <option value="'Courier New', monospace">Monospace</option>
+          <option value="Impact, sans-serif">Impact</option>
+          <option value="'Arial Black', sans-serif">Arial Black</option>
+        </select>
       </div>
     </div>
   );

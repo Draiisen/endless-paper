@@ -60,6 +60,7 @@ export default function App({ initialState, settings }: AppProps) {
   const [showSaves, setShowSaves] = useState(false);
   const [projectSizeMB, setProjectSizeMB] = useState(0);
   const [lodProcessingCount, setLodProcessingCount] = useState(0);
+  const [shareFlash, setShareFlash] = useState<'copied' | 'toobig' | null>(null);
 
   const { popup, handleNodeClick, dismiss: dismissPopup } = useHotspotHandler(viewerMode);
 
@@ -456,6 +457,31 @@ export default function App({ initialState, settings }: AppProps) {
     exportToFile(state);
   }, [getRootScene]);
 
+  const handleShare = useCallback(async () => {
+    const state: PersistedState = { version: 1, rootScene: getRootScene(), viewport: viewportRef.current, savedAt: Date.now(), assets: assetsRef.current };
+    try {
+      const json = JSON.stringify(state);
+      const cs = new CompressionStream('deflate-raw');
+      const writer = cs.writable.getWriter();
+      writer.write(new TextEncoder().encode(json));
+      writer.close();
+      const buf = await new Response(cs.readable).arrayBuffer();
+      const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+      const url = `${window.location.origin}${window.location.pathname}#share=${encodeURIComponent(b64)}`;
+      if (url.length > 100_000) {
+        setShareFlash('toobig');
+        setTimeout(() => setShareFlash(null), 3000);
+        return;
+      }
+      await navigator.clipboard.writeText(url);
+      setShareFlash('copied');
+      setTimeout(() => setShareFlash(null), 2500);
+    } catch {
+      setShareFlash('toobig');
+      setTimeout(() => setShareFlash(null), 3000);
+    }
+  }, [getRootScene]);
+
   const handleLoad = useCallback(async () => {
     try {
       const state = await importFromFile();
@@ -788,6 +814,9 @@ export default function App({ initialState, settings }: AppProps) {
         <button onClick={handleLoad} className="px-2 py-1 rounded text-xs text-gray-300 hover:text-white hover:bg-white/10 transition-colors">Load</button>
         <button onClick={() => setShowSaves(true)} title="Save management" className="px-2 py-1 rounded text-xs text-gray-300 hover:text-white hover:bg-white/10 transition-colors">Saves</button>
         <button onClick={() => setShowExport(true)} title="Ctrl+E" className="ml-1 px-3 py-1.5 rounded-lg bg-accent text-white text-xs font-semibold hover:bg-accent/80 transition-colors">Export</button>
+        <button onClick={handleShare} title="Copy share link to clipboard" className="px-2 py-1 rounded text-xs text-gray-300 hover:text-white hover:bg-white/10 transition-colors">
+          {shareFlash === 'copied' ? '✓ Copied!' : shareFlash === 'toobig' ? 'Too large' : 'Share'}
+        </button>
       </div>
 
       {/* Back button */}

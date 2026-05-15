@@ -120,6 +120,7 @@ export function renderScene(
     for (const node of arr) {
       if (node.isReference) continue;
       if (!isNodeVisible(node, worldLeft, worldTop, worldRight, worldBottom)) continue;
+      if (node.width * viewport.scale < 0.5 && node.height * viewport.scale < 0.5) continue;
       drawNode(ctx, node, highlightSelected, enterHintNodeId === node.id, animationTime, viewport.scale, viewerMode);
     }
     ctx.globalAlpha = 1;
@@ -506,13 +507,30 @@ function drawText(ctx: CanvasRenderingContext2D, node: SceneNode): void {
   if (!node.text) return;
   const fontSize = node.fontSize ?? 16;
   const fontFamily = node.fontFamily ?? 'system-ui, sans-serif';
-  ctx.font = `${fontSize}px ${fontFamily}`;
+  const weight = node.fontWeight ?? 'normal';
+  const style = node.fontStyle ?? 'normal';
+  const align = (node.textAlign ?? 'left') as CanvasTextAlign;
+  ctx.font = `${style} ${weight} ${fontSize}px ${fontFamily}`;
   ctx.textBaseline = 'top';
+  ctx.textAlign = align;
   ctx.fillStyle = node.color ?? '#1a1a2e';
   const lines = node.text.split('\n');
   const lineHeight = fontSize * 1.2;
+  const baseX = align === 'center' ? node.x + node.width / 2 : align === 'right' ? node.x + node.width : node.x;
   for (let i = 0; i < lines.length; i++) {
-    ctx.fillText(lines[i], node.x, node.y + i * lineHeight);
+    const ly = node.y + i * lineHeight;
+    ctx.fillText(lines[i], baseX, ly);
+    if (node.textDecoration === 'underline') {
+      const tw = ctx.measureText(lines[i]).width;
+      const uly = ly + fontSize * 0.92;
+      const ulX = align === 'center' ? baseX - tw / 2 : align === 'right' ? baseX - tw : baseX;
+      ctx.beginPath();
+      ctx.moveTo(ulX, uly);
+      ctx.lineTo(ulX + tw, uly);
+      ctx.strokeStyle = node.color ?? '#1a1a2e';
+      ctx.lineWidth = Math.max(1, fontSize * 0.07);
+      ctx.stroke();
+    }
   }
 }
 
