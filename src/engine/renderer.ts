@@ -593,39 +593,47 @@ function drawImageLOD(ctx: CanvasRenderingContext2D, node: SceneNode, viewportSc
     }
   }
 
-  // ── High zoom: colour vectors (source-pixel space → world via transform) ─
+  // ── Compute smooth blend factor between raster and vector ─────────────────
+  // ratio = how many screen pixels per source pixel. >1 means zoomed past native res.
+  // Blend zone 0.8→1.6: vector fades in gradually as user zooms, no hard pop.
   const lod = node.lod;
   const nw = lod?.naturalW ?? 0;
-  const useVectors = lod?.colorLayers && lod.colorLayers.length > 0 &&
-    lod.sourceW > 0 && lod.sourceH > 0 && nw > 0 &&
-    (nw / node.width) * viewportScale > 1.2;
+  const hasVectors = !!(lod?.colorLayers && lod.colorLayers.length > 0 &&
+    lod.sourceW > 0 && lod.sourceH > 0 && nw > 0);
+  const ratio = hasVectors ? (nw / node.width) * viewportScale : 0;
+  const vectorAlpha = hasVectors ? Math.min(1, Math.max(0, (ratio - 0.8) / 0.8)) : 0;
 
-  if (useVectors && lod) {
+  // ── Legacy monochrome vectorization ──────────────────────────────────────
+  if (!hasVectors && node.isVectorized && node.vectorPaths && node.vectorPaths.length > 0) {
+    if (node.imageData) drawImage(ctx, node);
+    for (const vp of node.vectorPaths) drawVectorPath(ctx, vp);
+    return;
+  }
+
+  // ── Raster base layer (always drawn while blending, skipped when fully vector)
+  if (vectorAlpha < 1 && node.imageData) {
+    drawImage(ctx, node);
+  }
+
+  // ── Vector layer fades in over the raster as zoom increases ───────────────
+  if (vectorAlpha > 0 && lod?.colorLayers) {
+    const outerAlpha = ctx.globalAlpha;
+    ctx.globalAlpha = outerAlpha * vectorAlpha;
     ctx.save();
-    // Map source-pixel coords [0,sourceW]×[0,sourceH] → world rect [node.x,node.y,node.width,node.height]
     ctx.transform(
       node.width / lod.sourceW, 0,
       0, node.height / lod.sourceH,
       node.x, node.y,
     );
-    for (const layer of lod.colorLayers!) {
+    for (const layer of lod.colorLayers) {
       ctx.fillStyle = layer.color;
       for (const vp of layer.paths) {
         ctx.fill(getPath2D(vp.d));
       }
     }
     ctx.restore();
-    return;
+    ctx.globalAlpha = outerAlpha;
   }
-
-  // ── Legacy monochrome vectorization (manual "Vectorize" button) ───────────
-  if (node.isVectorized && node.vectorPaths && node.vectorPaths.length > 0) {
-    for (const vp of node.vectorPaths) drawVectorPath(ctx, vp);
-    return;
-  }
-
-  // ── Default: draw the original raster ────────────────────────────────────
-  if (node.imageData) drawImage(ctx, node);
 }
 
 function drawImage(ctx: CanvasRenderingContext2D, node: SceneNode): void {
