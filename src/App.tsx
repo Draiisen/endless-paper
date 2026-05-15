@@ -69,7 +69,7 @@ export default function App({ initialState, settings }: AppProps) {
   const [assets, setAssets] = useState<Asset[]>(initAssets);
   const [showLibrary, setShowLibrary] = useState(false);
   const [showLayers, setShowLayers] = useState(false);
-  const [showMiniMap, setShowMiniMap] = useState(settings.miniMapVisible ?? true);
+  const [showMiniMap, setShowMiniMap] = useState(settings.miniMapVisible ?? window.innerWidth >= 640);
   const [showProperties, setShowProperties] = useState(false);
   const [activeLayerId, setActiveLayerId] = useState<string>('');
   const [symmetry, setSymmetry] = useState<SymmetryMode>(settings.symmetry ?? 'off');
@@ -1186,7 +1186,9 @@ export default function App({ initialState, settings }: AppProps) {
           {/* Duplicate */}
           <button onClick={handleDuplicate}
             className="w-9 h-9 flex items-center justify-center rounded-xl text-gray-400 active:text-white active:bg-white/10 touch-manipulation transition-colors text-base"
-            title="Dupliquer (⌘D)">⎘</button>
+            title="Dupliquer (⌘D)">
+            <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
+          </button>
           {/* Properties — single only */}
           {singleSelection && (
             <button onClick={() => setShowProperties(v => !v)}

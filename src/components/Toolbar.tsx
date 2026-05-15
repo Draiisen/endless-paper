@@ -114,7 +114,17 @@ export function Toolbar({
         title="Collapse toolbar"
       >‹</button>
 
-      <div className="w-10 h-px bg-white/10 mb-1 flex-shrink-0" />
+      {/* ── Color + stroke width — always at top ── */}
+      <div className="w-full flex flex-col items-center gap-1.5 py-2 border-y border-white/10 flex-shrink-0">
+        <ColorPicker value={strokeColor} onChange={setStrokeColor} title="Stroke color" swatchClassName="w-9 h-9 rounded-full border-2 border-white/30 cursor-pointer shadow-md touch-manipulation" />
+        <div className="w-10 flex flex-col items-center gap-0.5 flex-shrink-0" title={`Épaisseur: ${strokeWidth}`}>
+          <div className="w-7 rounded-full bg-white/50" style={{ height: `${Math.max(2, Math.min(10, strokeWidth))}px` }} />
+          <input type="range" min="1" max="20" value={strokeWidth}
+            onChange={e => setStrokeWidth(Number(e.target.value))}
+            className="accent-accent touch-manipulation w-10" />
+        </div>
+        <ColorPicker value={fillColor} onChange={setFillColor} title="Fill color" swatchClassName="w-8 h-8 rounded border-2 border-white/30 cursor-pointer shadow touch-manipulation" showFillToggle onClearFill={() => setFillColor(fillColor === 'none' ? '#ffffff' : 'none')} />
+      </div>
 
       {/* Drawing tools */}
       <ToolButton active={tool === 'hand'} onClick={() => setTool('hand')} title="Hand (H)">
@@ -261,19 +271,6 @@ export function Toolbar({
         </button>
       )}
 
-      {/* Color pickers */}
-      <div className="w-11 flex flex-col items-center gap-2 mt-2 mb-1 flex-shrink-0">
-        <ColorPicker value={strokeColor} onChange={setStrokeColor} title="Stroke color" swatchClassName="w-8 h-8 rounded-full border-2 border-white/30 cursor-pointer shadow-md touch-manipulation" />
-        <ColorPicker value={fillColor} onChange={setFillColor} title="Fill color" swatchClassName="w-7 h-7 rounded border-2 border-white/30 cursor-pointer shadow touch-manipulation" showFillToggle onClearFill={() => setFillColor(fillColor === 'none' ? '#ffffff' : 'none')} />
-      </div>
-
-      {/* Stroke width */}
-      <div className="w-11 flex flex-col items-center gap-1 mb-2 flex-shrink-0" title="Stroke width">
-        <div className="w-6 rounded-full bg-white/60" style={{ height: `${Math.max(2, Math.min(12, strokeWidth))}px` }} />
-        <input type="range" min="1" max="20" value={strokeWidth} onChange={e => setStrokeWidth(Number(e.target.value))}
-          className="accent-accent touch-manipulation"
-          style={{ writingMode: 'vertical-lr', direction: 'rtl', height: '60px' }} />
-      </div>
     </div>
   );
 }

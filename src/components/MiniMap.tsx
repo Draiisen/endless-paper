@@ -114,7 +114,7 @@ export function MiniMap({ scene, viewport, canvasWidth, canvasHeight, onTeleport
   };
 
   return (
-    <div className="fixed bottom-4 left-16 z-20 rounded-lg overflow-hidden shadow-xl border border-white/10 bg-ink/80 backdrop-blur-sm">
+    <div className="fixed bottom-24 left-16 z-20 rounded-lg overflow-hidden shadow-xl border border-white/10 bg-ink/80 backdrop-blur-sm">
       <canvas
         ref={canvasRef}
         width={W}

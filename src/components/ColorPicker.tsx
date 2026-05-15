@@ -78,10 +78,10 @@ export function ColorPicker({ value, onChange, swatchClassName, title, showFillT
       }
     };
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
-    window.addEventListener('mousedown', onClick);
+    window.addEventListener('pointerdown', onClick);
     window.addEventListener('keydown', onKey);
     return () => {
-      window.removeEventListener('mousedown', onClick);
+      window.removeEventListener('pointerdown', onClick);
       window.removeEventListener('keydown', onKey);
     };
   }, [open]);
