@@ -337,6 +337,7 @@ function drawNode(
   animationTime = 0,
   viewportScale = 1,
   viewerMode = false,
+  lensDepth = 0,        // prevents recursive lens-inside-lens rendering
 ): void {
   ctx.save();
 
@@ -356,42 +357,35 @@ function drawNode(
     ctx.globalAlpha = anim.alpha;
   }
 
-  switch (node.type) {
-    case 'path':
-      if (node.path) {
-        drawVectorPath(ctx, node.path);
-      }
-      break;
-
-    case 'image':
-      drawImageLOD(ctx, node, viewportScale);
-      break;
-
-    case 'rect':
-      drawRect(ctx, node);
-      break;
-
-    case 'circle':
-      drawCircle(ctx, node);
-      break;
-
-    case 'text':
-      drawText(ctx, node);
-      break;
-
-    case 'group':
-      drawGroupOutline(ctx, node);
-      break;
+  // Nodes with inner scenes become lenses — their inner world is rendered through them
+  if (node.innerScene && lensDepth === 0) {
+    drawLens(ctx, node, viewportScale);
+  } else {
+    switch (node.type) {
+      case 'path':
+        if (node.path) drawVectorPath(ctx, node.path);
+        break;
+      case 'image':
+        drawImageLOD(ctx, node, viewportScale);
+        break;
+      case 'rect':
+        drawRect(ctx, node);
+        break;
+      case 'circle':
+        drawCircle(ctx, node);
+        break;
+      case 'text':
+        drawText(ctx, node);
+        break;
+      case 'group':
+        drawGroupOutline(ctx, node);
+        break;
+    }
   }
 
   // Text along path
   if (node.path && node.textAlongPath) {
     drawTextAlongPath(ctx, node.path, node.textAlongPath);
-  }
-
-  // Inner scene preview
-  if (node.innerScene && node.innerScene.nodes.length > 0) {
-    drawInnerScenePreview(ctx, node, viewportScale);
   }
 
   if (showEnterHint && !viewerMode) {
@@ -711,31 +705,78 @@ function drawGroupOutline(ctx: CanvasRenderingContext2D, node: SceneNode): void 
   ctx.setLineDash([]);
 }
 
-function drawInnerScenePreview(ctx: CanvasRenderingContext2D, node: SceneNode, viewportScale: number): void {
-  ctx.save();
-  ctx.strokeStyle = 'rgba(74, 144, 217, 0.55)';
-  ctx.lineWidth = 2;
-  ctx.setLineDash([4, 3]);
-  ctx.strokeRect(node.x, node.y, node.width, node.height);
-  ctx.setLineDash([]);
-
-  // Badge "⬡ enter" — always visible if node is big enough on screen
+/**
+ * Render a node as a "lens" — its inner scene's content is visible through it.
+ * At depth-0 only (no recursive lens-inside-lens).
+ */
+function drawLens(ctx: CanvasRenderingContext2D, node: SceneNode, viewportScale: number): void {
+  const inner = node.innerScene!;
   const screenW = node.width * viewportScale;
-  if (screenW > 30) {
-    const iconSize = Math.max(9, Math.min(14, screenW * 0.06));
-    ctx.fillStyle = 'rgba(74, 144, 217, 0.85)';
-    ctx.font = `bold ${iconSize}px sans-serif`;
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'top';
-    ctx.fillText('⬡', node.x + node.width - 3, node.y + 3);
-    // Show label if large enough
-    if (screenW > 80) {
-      ctx.font = `${Math.max(8, iconSize * 0.85)}px sans-serif`;
-      ctx.fillStyle = 'rgba(74, 144, 217, 0.65)';
-      ctx.textAlign = 'left';
-      ctx.fillText('double-tap to enter', node.x + 4, node.y + node.height - iconSize - 3);
+
+  // ── Empty inner scene: subtle drillable hint ──────────────────────────────
+  if (inner.nodes.length === 0) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(74, 144, 217, 0.45)';
+    ctx.lineWidth = 1.5 / viewportScale;
+    ctx.setLineDash([5 / viewportScale, 3 / viewportScale]);
+    ctx.strokeRect(node.x, node.y, node.width, node.height);
+    ctx.setLineDash([]);
+    if (screenW > 40) {
+      const sz = Math.max(8, Math.min(13, screenW * 0.055));
+      ctx.fillStyle = 'rgba(74, 144, 217, 0.5)';
+      ctx.font = `${sz}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('⬡', node.x + node.width / 2, node.y + node.height / 2);
+    }
+    ctx.restore();
+    return;
+  }
+
+  // ── Compute inner bounding box ────────────────────────────────────────────
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const n of inner.nodes) {
+    minX = Math.min(minX, n.x);      minY = Math.min(minY, n.y);
+    maxX = Math.max(maxX, n.x + n.width); maxY = Math.max(maxY, n.y + n.height);
+  }
+  const bw = maxX - minX, bh = maxY - minY;
+
+  ctx.save();
+
+  // ── Background fill (inner scene's background colour) ────────────────────
+  ctx.fillStyle = inner.background || '#ffffff';
+  ctx.fillRect(node.x, node.y, node.width, node.height);
+
+  // ── Clip drawing to node bounds ───────────────────────────────────────────
+  ctx.beginPath();
+  ctx.rect(node.x, node.y, node.width, node.height);
+  ctx.clip();
+
+  // ── Scale inner content to fit node bounds (5 % margin) ──────────────────
+  if (bw > 0 && bh > 0) {
+    const pad = 0.05;
+    const s = Math.min(
+      node.width  * (1 - pad * 2) / bw,
+      node.height * (1 - pad * 2) / bh,
+    );
+    const ox = node.x + node.width  / 2 - (minX + bw / 2) * s;
+    const oy = node.y + node.height / 2 - (minY + bh / 2) * s;
+
+    ctx.transform(s, 0, 0, s, ox, oy);
+
+    const innerScale = viewportScale * s;
+    for (const innerNode of inner.nodes.slice(0, 24)) {
+      drawNode(ctx, innerNode, undefined, false, 0, innerScale, true, 1);
     }
   }
+
+  ctx.restore();
+
+  // ── Thin border to frame the lens ─────────────────────────────────────────
+  ctx.save();
+  ctx.strokeStyle = 'rgba(74, 144, 217, 0.6)';
+  ctx.lineWidth = 1.5 / viewportScale;
+  ctx.strokeRect(node.x, node.y, node.width, node.height);
   ctx.restore();
 }
 

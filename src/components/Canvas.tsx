@@ -161,9 +161,8 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   const dragAnchorPartRef = useRef<'anchor' | 'in' | 'out'>('anchor');
   const selectedAnchorIdxRef = useRef<number | null>(null);
 
-  // Portal / scene-enter flash state
+  // Portal flash state
   const isPortalingRef = useRef(false);
-  const enterFlashRef = useRef(0); // 0..1 fade progress (drives white flash on scene entry)
 
   // Auto-exit zoom debounce
   const lastAutoExitTimeRef = useRef(0);
@@ -331,21 +330,39 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
       const canvas = canvasRef.current;
       const w = canvas?.width ?? window.innerWidth;
       const h = canvas?.height ?? window.innerHeight;
-      const innerVp = { x: w / 2, y: h / 2, scale: 1 };
-      // Prevent auto-exit from firing on the scale drop caused by this programmatic reset.
-      // Brief white flash to mask the hard scene switch
-      enterFlashRef.current = 1;
-      const fadeStart = performance.now();
-      const fadeStep = () => {
-        const elapsed = performance.now() - fadeStart;
-        enterFlashRef.current = Math.max(0, 1 - elapsed / 300);
-        needsRenderRef.current = true;
-        if (enterFlashRef.current > 0) requestAnimationFrame(fadeStep);
-      };
-      requestAnimationFrame(fadeStep);
 
+      // Seamless viewport: compute the viewport that makes world-2 appear at the
+      // exact same position/scale as the lens preview did in world-1, so there is
+      // no visible jump when the scene switches.
+      const innerNodes = updatedNode.innerScene?.nodes ?? [];
+      let innerVp: Viewport;
+      if (innerNodes.length > 0) {
+        const bounds = getBoundingBox(innerNodes);
+        const bw = bounds.width, bh = bounds.height;
+        if (bw > 0 && bh > 0) {
+          const pad = 0.05;
+          const s = Math.min(
+            node.width  * (1 - pad * 2) / bw,
+            node.height * (1 - pad * 2) / bh,
+          );
+          const ox = node.x + node.width  / 2 - (bounds.x + bw / 2) * s;
+          const oy = node.y + node.height / 2 - (bounds.y + bh / 2) * s;
+          const vp = viewportRef.current; // viewport at moment of entry (node fills screen)
+          innerVp = {
+            scale: s * vp.scale,
+            x: ox * vp.scale + vp.x,
+            y: oy * vp.scale + vp.y,
+          };
+        } else {
+          innerVp = { x: w / 2, y: h / 2, scale: 1 };
+        }
+      } else {
+        innerVp = { x: w / 2, y: h / 2, scale: 1 };
+      }
+
+      // Prevent auto-exit from firing immediately after entry.
       lastAutoExitTimeRef.current = Date.now();
-      prevScaleRef.current = 1;
+      prevScaleRef.current = innerVp.scale;
       setSceneStack(newStack);
       setScene(updatedNode.innerScene!);
       setViewport(innerVp);
@@ -875,14 +892,6 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
             ctx.restore();
           }
 
-          // Scene-entry flash (fades out over 300ms)
-          if (enterFlashRef.current > 0) {
-            ctx.save();
-            ctx.setTransform(1, 0, 0, 1, 0, 0);
-            ctx.fillStyle = `rgba(255, 255, 255, ${enterFlashRef.current * 0.6})`;
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.restore();
-          }
         }
         needsRenderRef.current = false;
       }
