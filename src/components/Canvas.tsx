@@ -707,6 +707,14 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
           const symmCx = symmCenterRef.current.x;
           const symmCy = symmCenterRef.current.y;
 
+          const rootStartCam = sceneStackRef.current[0]?.scene?.startCamera;
+          const startCameraPin = rootStartCam ? (() => {
+            const vp = rootStartCam.viewport;
+            const w = canvas.width;
+            const h = canvas.height;
+            return { x: (w / 2 - vp.x) / vp.scale, y: (h / 2 - vp.y) / vp.scale };
+          })() : null;
+
           renderScene(ctx, sceneRef.current, viewportRef.current, {
             highlightSelected: selectedNodeIdsRef.current,
             showGrid: true,
@@ -720,6 +728,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
             pathEditNodeId: pathEditNodeIdRef.current,
             pathEditAnchors: pathAnchorsRef.current.length > 0 ? pathAnchorsRef.current : undefined,
             animationTime: Date.now(),
+            startCameraPin,
           });
 
           // Draw live stroke (and mirrored previews)

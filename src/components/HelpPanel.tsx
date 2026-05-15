@@ -69,7 +69,7 @@ export function HelpPanel({ onClose }: { onClose: () => void }) {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-2">
-      <h3 className="text-white text-[11px] font-semibold uppercase tracking-wider text-white/50">{title}</h3>
+      <h3 className="text-accent text-[11px] font-semibold uppercase tracking-wider">{title}</h3>
       <div className="flex flex-col gap-2">{children}</div>
     </div>
   );

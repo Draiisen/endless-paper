@@ -1044,7 +1044,7 @@ export default function App({ initialState, settings }: AppProps) {
       {showMobileMenu && (
         <div className="sm:hidden fixed inset-0 z-40" onClick={() => setShowMobileMenu(false)}>
           <div
-            className="absolute right-0 top-12 bg-ink/98 border-l border-b border-white/10 rounded-bl-2xl shadow-2xl p-4 flex flex-col gap-3 min-w-[220px]"
+            className="absolute right-0 top-12 bg-ink border-l border-b border-white/10 rounded-bl-2xl shadow-2xl p-4 flex flex-col gap-3 min-w-[220px]"
             onClick={e => e.stopPropagation()}
           >
             {/* Zoom display */}
