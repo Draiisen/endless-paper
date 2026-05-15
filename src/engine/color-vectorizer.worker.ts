@@ -281,10 +281,11 @@ function process(
   const minPixels = Math.max(50, n * 0.005); // skip tiny clusters (< 0.5% of image)
   const simplifyTol = Math.max(1.5, Math.min(w, h) / 100);
 
-  const layers: LayerData[] = [];
+  const layers: Array<LayerData & { pixelCount: number }> = [];
 
   for (let c = 0; c < centroids.length; c++) {
-    if (countPixels(assignments, c, n) < minPixels) continue;
+    const pixelCount = countPixels(assignments, c, n);
+    if (pixelCount < minPixels) continue;
 
     // Build mask for this cluster
     const mask = new Uint8Array(n);
@@ -300,13 +301,13 @@ function process(
     const trimmed = paths.slice(0, 80);
     if (trimmed.length === 0) continue;
 
-    layers.push({ r: centroids[c][0], g: centroids[c][1], b: centroids[c][2], paths: trimmed });
+    layers.push({ r: centroids[c][0], g: centroids[c][1], b: centroids[c][2], paths: trimmed, pixelCount });
   }
 
-  // Sort: largest area first (background-like colors behind)
-  layers.sort((a, b) => b.paths.length - a.paths.length);
+  // Sort: most pixels first so background/dominant colors render below details
+  layers.sort((a, b) => b.pixelCount - a.pixelCount);
 
-  return layers;
+  return layers.map(({ r, g, b, paths }) => ({ r, g, b, paths }));
 }
 
 // ── Worker entry point ────────────────────────────────────────────────────────

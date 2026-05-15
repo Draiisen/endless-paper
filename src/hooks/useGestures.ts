@@ -477,7 +477,7 @@ export function useGestures(
       return;
     }
 
-    if (isDragging.current && tool === 'select') {
+    if (isDragging.current && (tool === 'select' || tool === 'pathedit')) {
       const worldDx = dx / viewport.scale;
       const worldDy = dy / viewport.scale;
       callbacksRef.current.onDragMove?.(worldDx, worldDy);

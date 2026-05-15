@@ -86,6 +86,7 @@ export default function App({ initialState, settings }: AppProps) {
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [showWelcome, setShowWelcome] = useState(() => !localStorage.getItem('ep_welcomed_v1'));
   const [showHelp, setShowHelp] = useState(false);
+  const [errorToast, setErrorToast] = useState<string | null>(null);
 
   const { popup, handleNodeClick, dismiss: dismissPopup } = useHotspotHandler(viewerMode);
 
@@ -675,6 +676,10 @@ export default function App({ initialState, settings }: AppProps) {
     reader.onload = (ev) => {
       const dataUrl = ev.target?.result as string;
       const img = new Image();
+      img.onerror = () => {
+        setErrorToast('Impossible de charger cette image.');
+        setTimeout(() => setErrorToast(null), 3500);
+      };
       img.onload = () => {
         const maxW = 400; const maxH = 300;
         let w = img.naturalWidth; let h = img.naturalHeight;
@@ -704,7 +709,7 @@ export default function App({ initialState, settings }: AppProps) {
         try {
           setLodProcessingCount(c => c + 1);
           let cancelFn: () => void = () => {};
-          cancelFn = requestColorVectorization(node, img, 8, (nodeId, lod) => {
+          cancelFn = requestColorVectorization(node, img, 10, (nodeId, lod) => {
             lodCancelsRef.current.delete(cancelFn);
             setLodProcessingCount(c => Math.max(0, c - 1));
             applyLodResult(nodeId, lod);
@@ -1310,6 +1315,12 @@ export default function App({ initialState, settings }: AppProps) {
       )}
 
       {showHelp && <HelpPanel onClose={() => setShowHelp(false)} />}
+
+      {errorToast && (
+        <div className="fixed left-1/2 top-20 -translate-x-1/2 bg-red-600/90 text-white text-xs px-4 py-2 rounded-full backdrop-blur-sm z-50 pointer-events-none">
+          {errorToast}
+        </div>
+      )}
     </div>
   );
 }

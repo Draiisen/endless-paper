@@ -609,7 +609,7 @@ function drawImageLOD(ctx: CanvasRenderingContext2D, node: SceneNode, viewportSc
   const nw = lod?.naturalW ?? 0;
   const hasVectors = !!(lod?.colorLayers && lod.colorLayers.length > 0 &&
     lod.sourceW > 0 && lod.sourceH > 0 && nw > 0);
-  const ratio = hasVectors ? (nw / node.width) * viewportScale : 0;
+  const ratio = hasVectors && node.width > 0 ? (nw / node.width) * viewportScale : 0;
   let vectorAlpha = hasVectors ? Math.min(1, Math.max(0, (ratio - 0.8) / 0.8)) : 0;
 
   // Fade-in when vectors just finished loading (600 ms transition)

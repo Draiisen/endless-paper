@@ -116,6 +116,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   const needsRenderRef = useRef(true);
   const isDirtyRef = useRef(false);
   const [isVectorizing, setIsVectorizing] = useState(false);
+  const [dropError, setDropError] = useState<string | null>(null);
   const [textEdit, setTextEdit] = useState<TextEditState | null>(null);
   const textCommittedRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -593,8 +594,8 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
           a.outX = (a.outX ?? a.x) + dx; a.outY = (a.outY ?? a.y) + dy;
           // Mirror in handle to maintain smooth curve (Shift = break symmetry)
           if (!shiftKeyRef.current && a.inX !== undefined && a.inY !== undefined) {
-            const idx2 = a.inX - a.x; const idy = a.inY - a.y;
-            const inLen = Math.hypot(idx2, idy);
+            const inDx = a.inX - a.x; const inDy = a.inY - a.y;
+            const inLen = Math.hypot(inDx, inDy);
             const mirDx = a.x - a.outX; const mirDy = a.y - a.outY;
             const mirLen = Math.hypot(mirDx, mirDy);
             if (mirLen > 0 && inLen > 0) {
@@ -1069,6 +1070,10 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
       reader.onload = (ev) => {
         const dataUrl = ev.target?.result as string;
         const img = new Image();
+        img.onerror = () => {
+          setDropError('Impossible de charger cette image.');
+          setTimeout(() => setDropError(null), 3500);
+        };
         img.onload = () => {
           const maxW = 400 / viewportRef.current.scale;
           const maxH = 300 / viewportRef.current.scale;
@@ -1256,6 +1261,12 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
             <div className="w-5 h-5 border-2 border-accent border-t-transparent rounded-full animate-spin" />
             <span>Vectorizing image…</span>
           </div>
+        </div>
+      )}
+
+      {dropError && (
+        <div className="fixed left-1/2 top-20 -translate-x-1/2 bg-red-600/90 text-white text-xs px-4 py-2 rounded-full backdrop-blur-sm z-30 pointer-events-none">
+          {dropError}
         </div>
       )}
 
