@@ -19,8 +19,8 @@ const MAX_DIM = 480;
 
 function extractPixels(img: HTMLImageElement): { buffer: ArrayBuffer; w: number; h: number } {
   const aspect = img.naturalWidth / Math.max(1, img.naturalHeight);
-  const w = Math.round(Math.min(img.naturalWidth, MAX_DIM));
-  const h = Math.round(w / aspect);
+  const w = Math.max(1, Math.round(Math.min(img.naturalWidth, MAX_DIM)));
+  const h = Math.max(1, Math.round(w / aspect));
   const c = document.createElement('canvas');
   c.width = w; c.height = h;
   c.getContext('2d')!.drawImage(img, 0, 0, w, h);
@@ -81,7 +81,12 @@ export function requestColorVectorization(
     onComplete(nodeId, { colorLayers, sourceW, sourceH });
   };
 
-  worker.onerror = () => worker.terminate();
+  // On worker failure, still report completion (empty result) so callers
+  // can balance any in-flight counter and the image just stays raster.
+  worker.onerror = () => {
+    worker.terminate();
+    onComplete(node.id, { colorLayers: [], sourceW: 0, sourceH: 0 });
+  };
 
   worker.postMessage(
     { nodeId: node.id, pixels: buffer, width: w, height: h, numColors },

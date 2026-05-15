@@ -315,6 +315,11 @@ self.onmessage = (e: MessageEvent<WorkerInput>) => {
   const { nodeId, pixels, width, height, numColors } = e.data;
   try {
     const data = new Uint8ClampedArray(pixels);
+    // Guard: buffer must hold width×height RGBA pixels, else bail (no OOB reads).
+    if (width < 1 || height < 1 || data.length < width * height * 4) {
+      (self as unknown as Worker).postMessage({ nodeId, layers: [], sourceW: width, sourceH: height });
+      return;
+    }
     const layers = process(data, width, height, numColors ?? 8);
     const output: WorkerOutput = { nodeId, layers, sourceW: width, sourceH: height };
     (self as unknown as Worker).postMessage(output);

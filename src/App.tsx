@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { Scene, ToolType, Viewport, SceneLevel, PersistedState, Asset, Layer, SceneAudio, StartCamera, SymmetryMode } from './types/scene';
+import { Scene, ToolType, Viewport, SceneLevel, PersistedState, Asset, Layer, SceneAudio, StartCamera, SymmetryMode, ImageLOD } from './types/scene';
 import { createScene, createNode, addNode, ensureLayers, createLayer, buildSceneCatalog, generateId, getBoundingBox } from './engine/scene-graph';
 import { Canvas, CanvasHandle } from './components/Canvas';
 import { Toolbar } from './components/Toolbar';
@@ -22,6 +22,24 @@ function makeInitialViewport(): Viewport {
 
 function createInitialSceneStack(scene: Scene, vp: Viewport): SceneLevel[] {
   return [{ scene, parentNodeId: '', label: 'World', viewportWhenLeft: vp }];
+}
+
+/** Re-link a scene stack bottom-up so each parent embeds its child's updated innerScene. */
+function rebuildStackFromLeaves(stack: SceneLevel[]): SceneLevel[] {
+  if (stack.length <= 1) return stack;
+  const out = [...stack];
+  for (let i = out.length - 1; i > 0; i--) {
+    const parentEntry = out[i - 1];
+    const parentNodeId = out[i].parentNodeId;
+    out[i - 1] = {
+      ...parentEntry,
+      scene: {
+        ...parentEntry.scene,
+        nodes: parentEntry.scene.nodes.map(n => n.id === parentNodeId ? { ...n, innerScene: out[i].scene } : n),
+      },
+    };
+  }
+  return out;
 }
 
 interface AppProps {
@@ -67,6 +85,7 @@ export default function App({ initialState, settings }: AppProps) {
   const savedFlashTimerRef = useRef<number | null>(null);
   const autoSaveTimerRef = useRef<number | null>(null);
   const canvasHandleRef = useRef<CanvasHandle | null>(null);
+  const lodCancelsRef = useRef<Set<() => void>>(new Set());
 
   const history = useHistory(initScene, initViewport);
   const [scene, setSceneState] = useState<Scene>(initScene);
@@ -102,7 +121,8 @@ export default function App({ initialState, settings }: AppProps) {
     } else {
       audioManager.stop();
     }
-  }, [scene, viewerMode]);
+    return () => audioManager.stop();
+  }, [scene.audio, viewerMode]);
 
   // Persist settings
   useEffect(() => {
@@ -201,6 +221,44 @@ export default function App({ initialState, settings }: AppProps) {
   }, [history, scheduleAutoSave]);
 
   useEffect(() => { scheduleAutoSave(); }, []); // eslint-disable-line
+
+  // Apply an async color-vectorization result onto whichever scene in the
+  // stack still holds the node. Bails out if the node was deleted or the
+  // scene was replaced (New / Load) while the worker was running.
+  const applyLodResult = useCallback((nodeId: string, lod: Pick<ImageLOD, 'colorLayers' | 'sourceW' | 'sourceH'>) => {
+    const stack = sceneStackRef.current;
+    let idx = -1;
+    for (let i = stack.length - 1; i >= 0; i--) {
+      if (stack[i].scene.nodes.some(n => n.id === nodeId)) { idx = i; break; }
+    }
+    if (idx === -1) return; // node gone — discard stale worker result
+    const patched = stack.map((entry, i) => i !== idx ? entry : {
+      ...entry,
+      scene: {
+        ...entry.scene,
+        nodes: entry.scene.nodes.map(n => n.id === nodeId
+          ? { ...n, lod: { ...(n.lod ?? {}), colorLayers: lod.colorLayers, sourceW: lod.sourceW, sourceH: lod.sourceH } }
+          : n),
+      },
+    });
+    const rebuilt = rebuildStackFromLeaves(patched);
+    setSceneStack(rebuilt);
+    setScene(rebuilt[rebuilt.length - 1].scene);
+    scheduleAutoSave();
+  }, [setSceneStack, setScene, scheduleAutoSave]);
+
+  // Terminate any in-flight vectorization workers (used on New / Load).
+  const cancelAllLod = useCallback(() => {
+    for (const fn of lodCancelsRef.current) fn();
+    lodCancelsRef.current.clear();
+    setLodProcessingCount(0);
+  }, []);
+
+  // Terminate workers on unmount without touching state.
+  useEffect(() => {
+    const cancels = lodCancelsRef.current;
+    return () => { for (const fn of cancels) fn(); cancels.clear(); };
+  }, []);
 
   const handleUndo = useCallback(() => {
     const entry = history.undo();
@@ -429,6 +487,7 @@ export default function App({ initialState, settings }: AppProps) {
     input.accept = 'audio/*';
     input.onchange = () => {
       const file = input.files?.[0];
+      if (input.parentNode) document.body.removeChild(input);
       if (!file) return;
       if (file.size > 2 * 1024 * 1024) { alert('Audio file must be under 2 MB.'); return; }
       const reader = new FileReader();
@@ -442,7 +501,6 @@ export default function App({ initialState, settings }: AppProps) {
     };
     document.body.appendChild(input);
     input.click();
-    document.body.removeChild(input);
   }, [setScene, handleSceneChange]);
 
   const handleUpdateSceneAudio = useCallback((audio: SceneAudio | undefined) => {
@@ -466,7 +524,14 @@ export default function App({ initialState, settings }: AppProps) {
       writer.write(new TextEncoder().encode(json));
       writer.close();
       const buf = await new Response(cs.readable).arrayBuffer();
-      const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+      // Chunked base64 — spreading a large byte array into fromCharCode
+      // overflows the call stack on real-sized scenes.
+      const bytes = new Uint8Array(buf);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i += 0x8000) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      }
+      const b64 = btoa(binary);
       const url = `${window.location.origin}${window.location.pathname}#share=${encodeURIComponent(b64)}`;
       if (url.length > 100_000) {
         setShareFlash('toobig');
@@ -485,6 +550,7 @@ export default function App({ initialState, settings }: AppProps) {
   const handleLoad = useCallback(async () => {
     try {
       const state = await importFromFile();
+      cancelAllLod();
       const newScene = state.rootScene;
       const newVp = state.viewport ?? makeInitialViewport();
       setScene(newScene);
@@ -495,9 +561,10 @@ export default function App({ initialState, settings }: AppProps) {
       history.push(newScene, newVp);
       scheduleAutoSave();
     } catch { /* cancelled */ }
-  }, [setScene, setSceneStack, history, scheduleAutoSave]);
+  }, [setScene, setSceneStack, history, scheduleAutoSave, cancelAllLod]);
 
   const handleRestoreFromSave = useCallback((state: PersistedState) => {
+    cancelAllLod();
     const newScene = state.rootScene;
     const newVp = state.viewport ?? makeInitialViewport();
     setScene(newScene);
@@ -507,10 +574,11 @@ export default function App({ initialState, settings }: AppProps) {
     setAssets(state.assets ?? []);
     history.push(newScene, newVp);
     scheduleAutoSave();
-  }, [setScene, setSceneStack, history, scheduleAutoSave]);
+  }, [setScene, setSceneStack, history, scheduleAutoSave, cancelAllLod]);
 
   const handleNew = useCallback(() => {
     if (!confirm('Start a new canvas? Unsaved changes will be lost.')) return;
+    cancelAllLod();
     const newScene = createScene();
     const newVp = makeInitialViewport();
     setScene(newScene);
@@ -521,7 +589,7 @@ export default function App({ initialState, settings }: AppProps) {
     history.push(newScene, newVp);
     clearLocalStorage();
     void clearIDB();
-  }, [setScene, setSceneStack, history]);
+  }, [setScene, setSceneStack, history, cancelAllLod]);
 
   const handleImageImport = useCallback((file: File) => {
     const reader = new FileReader();
@@ -537,9 +605,12 @@ export default function App({ initialState, settings }: AppProps) {
         const node = createNode('image', cx, cy, w, h);
         node.imageData = dataUrl;
         node.layerId = activeLayerId || undefined;
-        // Thumbnail: fast, synchronous, ready immediately
+        // Thumbnail: fast, synchronous, ready immediately. If it throws
+        // (canvas memory limit, tainted image) the raster still works.
+        let thumbnail: string | undefined;
+        try { thumbnail = generateThumbnail(img); } catch { thumbnail = undefined; }
         node.lod = {
-          thumbnail: generateThumbnail(img),
+          thumbnail,
           sourceW: 0,
           sourceH: 0,
           naturalW: img.naturalWidth,
@@ -550,28 +621,26 @@ export default function App({ initialState, settings }: AppProps) {
         setScene(newScene);
         handleSceneChange(newScene, viewport);
 
-        // Color-vector LOD: runs in a Web Worker, updates scene when done
-        setLodProcessingCount(c => c + 1);
-        requestColorVectorization(node, img, 8, (nodeId, lod) => {
-          setLodProcessingCount(c => c - 1);
-          const cur = sceneRef.current;
-          const updated = {
-            ...cur,
-            nodes: cur.nodes.map(n =>
-              n.id === nodeId
-                ? { ...n, lod: { ...(n.lod ?? {}), colorLayers: lod.colorLayers, sourceW: lod.sourceW, sourceH: lod.sourceH } }
-                : n,
-            ),
-          };
-          setScene(updated);
-          scheduleAutoSave();
-        });
+        // Color-vector LOD: runs in a Web Worker, updates scene when done.
+        try {
+          setLodProcessingCount(c => c + 1);
+          let cancelFn: () => void = () => {};
+          cancelFn = requestColorVectorization(node, img, 8, (nodeId, lod) => {
+            lodCancelsRef.current.delete(cancelFn);
+            setLodProcessingCount(c => Math.max(0, c - 1));
+            applyLodResult(nodeId, lod);
+          });
+          lodCancelsRef.current.add(cancelFn);
+        } catch {
+          // vectorization could not start — raster fallback is fine
+          setLodProcessingCount(c => Math.max(0, c - 1));
+        }
       };
       img.src = dataUrl;
     };
     reader.readAsDataURL(file);
     setTool('select');
-  }, [viewport, activeLayerId, setScene, handleSceneChange, scheduleAutoSave]);
+  }, [viewport, activeLayerId, setScene, handleSceneChange, applyLodResult]);
 
   // Minimap teleport
   const handleMiniMapTeleport = useCallback((worldX: number, worldY: number) => {

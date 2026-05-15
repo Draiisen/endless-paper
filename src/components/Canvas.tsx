@@ -102,6 +102,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   const isDirtyRef = useRef(false);
   const [isVectorizing, setIsVectorizing] = useState(false);
   const [textEdit, setTextEdit] = useState<TextEditState | null>(null);
+  const textCommittedRef = useRef(false);
   const [enterHintNodeId, setEnterHintNodeId] = useState<string | null>(null);
   const enterHintNodeIdRef = useRef<string | null>(null);
   useEffect(() => { enterHintNodeIdRef.current = enterHintNodeId; needsRenderRef.current = true; }, [enterHintNodeId]);
@@ -553,6 +554,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
     }, [setSelectedNodeIds, markDirty]),
 
     onTextCreate: useCallback((wx: number, wy: number, sx: number, sy: number) => {
+      textCommittedRef.current = false;
       setTextEdit({ screenX: sx, screenY: sy, worldX: wx, worldY: wy, value: '', fontSize: 18 });
     }, []),
   };
@@ -912,7 +914,10 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   }), [vectorizeSelected, cancelStroke, enterSelected, groupSelected, ungroupSelected, animateViewport]);
 
   const commitTextEdit = useCallback(() => {
-    if (!textEdit) return;
+    // Enter triggers a commit then unmounts the textarea, whose blur fires a
+    // second commit — this guard stops a duplicate text node being created.
+    if (!textEdit || textCommittedRef.current) return;
+    textCommittedRef.current = true;
     const text = textEdit.value;
     if (text.trim().length > 0) {
       const ctx = canvasRef.current?.getContext('2d');
