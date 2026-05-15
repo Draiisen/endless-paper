@@ -158,8 +158,6 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   const pathEditNodeIdRef = useRef<string | null>(null);
   const dragAnchorIdxRef = useRef<number | null>(null);
   const dragAnchorPartRef = useRef<'anchor' | 'in' | 'out'>('anchor');
-  // dragAnchorIdxRef and dragAnchorPartRef used in pathedit pointer handlers
-  void dragAnchorIdxRef; void dragAnchorPartRef;
 
   // Portal flash state
   const isPortalingRef = useRef(false);
@@ -439,6 +437,29 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
     onShapeMove: useCallback(() => { markDirty(); }, [markDirty]),
 
     onSelect: useCallback((worldX: number, worldY: number, additive: boolean) => {
+      // Pathedit: hit-test anchors and handles before anything else
+      if (toolRef.current === 'pathedit' && pathAnchorsRef.current.length > 0) {
+        const hitR = Math.max(6, 8 / viewportRef.current.scale);
+        const anchors = pathAnchorsRef.current;
+        for (let i = 0; i < anchors.length; i++) {
+          const a = anchors[i];
+          if (a.inX !== undefined && a.inY !== undefined &&
+              Math.hypot(worldX - a.inX, worldY - a.inY) <= hitR) {
+            dragAnchorIdxRef.current = i; dragAnchorPartRef.current = 'in'; return;
+          }
+          if (a.outX !== undefined && a.outY !== undefined &&
+              Math.hypot(worldX - a.outX, worldY - a.outY) <= hitR) {
+            dragAnchorIdxRef.current = i; dragAnchorPartRef.current = 'out'; return;
+          }
+          if (Math.abs(worldX - a.x) <= hitR && Math.abs(worldY - a.y) <= hitR) {
+            dragAnchorIdxRef.current = i; dragAnchorPartRef.current = 'anchor'; return;
+          }
+        }
+        // Clicked empty space in pathedit — clear anchor drag state but don't deselect
+        dragAnchorIdxRef.current = null;
+        return;
+      }
+
       // Check if the click lands on a resize handle of the single selected node.
       const selIds = selectedNodeIdsRef.current;
       if (selIds.size === 1) {
@@ -530,6 +551,30 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
     }, [setSelectedNodeIds, markDirty, onHotspotClick, setScene, setViewport, setSceneStack]),
 
     onDragMove: useCallback((dx: number, dy: number) => {
+      // Pathedit anchor drag
+      if (toolRef.current === 'pathedit' && dragAnchorIdxRef.current !== null) {
+        const idx = dragAnchorIdxRef.current;
+        const part = dragAnchorPartRef.current;
+        const anchors = pathAnchorsRef.current.map((a, i) => i !== idx ? a : { ...a });
+        const a = anchors[idx];
+        if (part === 'anchor') {
+          const hdxi = a.inX !== undefined ? a.inX - a.x : undefined;
+          const hdyi = a.inY !== undefined ? a.inY - a.y : undefined;
+          const hdxo = a.outX !== undefined ? a.outX - a.x : undefined;
+          const hdyo = a.outY !== undefined ? a.outY - a.y : undefined;
+          a.x += dx; a.y += dy;
+          if (hdxi !== undefined) { a.inX = a.x + hdxi; a.inY = a.y + (hdyi ?? 0); }
+          if (hdxo !== undefined) { a.outX = a.x + hdxo; a.outY = a.y + (hdyo ?? 0); }
+        } else if (part === 'in') {
+          a.inX = (a.inX ?? a.x) + dx; a.inY = (a.inY ?? a.y) + dy;
+        } else {
+          a.outX = (a.outX ?? a.x) + dx; a.outY = (a.outY ?? a.y) + dy;
+        }
+        pathAnchorsRef.current = anchors;
+        markDirty();
+        return;
+      }
+
       // Resize mode: one of the selection handles is being dragged
       if (resizeStateRef.current) {
         const rs = resizeStateRef.current;
@@ -583,6 +628,25 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
     }, [setScene, markDirty]),
 
     onDragEnd: useCallback(() => {
+      // Pathedit: commit anchor changes to scene
+      if (toolRef.current === 'pathedit' && dragAnchorIdxRef.current !== null) {
+        dragAnchorIdxRef.current = null;
+        const anchors = pathAnchorsRef.current;
+        const nodeId = pathEditNodeIdRef.current;
+        if (anchors.length > 0 && nodeId) {
+          const d = anchorsToPath(anchors);
+          if (d) {
+            const node = sceneRef.current.nodes.find(n => n.id === nodeId);
+            if (node?.path) {
+              const newScene = updateNode(sceneRef.current, nodeId, { path: { ...node.path, d } });
+              setScene(newScene);
+              onSceneChange(newScene, viewportRef.current);
+            }
+          }
+        }
+        return;
+      }
+
       if (resizeStateRef.current) {
         onSceneChange(sceneRef.current, viewportRef.current);
         resizeStateRef.current = null;
