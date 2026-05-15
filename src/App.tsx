@@ -493,6 +493,56 @@ export default function App({ initialState, settings }: AppProps) {
     handleSceneChange(newScene, viewportRef.current);
   }, [selectedNodeIds, setScene, handleSceneChange]);
 
+  const handleDeleteSelected = useCallback(() => {
+    if (selectedNodeIds.size === 0) return;
+    const newScene = { ...sceneRef.current, nodes: sceneRef.current.nodes.filter(n => !selectedNodeIds.has(n.id)) };
+    setScene(newScene);
+    handleSceneChange(newScene, viewportRef.current);
+    setSelectedNodeIds(new Set());
+  }, [selectedNodeIds, setScene, handleSceneChange]);
+
+  const handleDuplicate = useCallback(() => {
+    if (selectedNodeIds.size === 0) return;
+    const OFFSET = 20;
+    const groupIdMap = new Map<string, string>();
+    const duped = sceneRef.current.nodes.filter(n => selectedNodeIds.has(n.id)).map(n => {
+      let groupId = n.groupId;
+      if (groupId) {
+        if (!groupIdMap.has(groupId)) groupIdMap.set(groupId, generateId());
+        groupId = groupIdMap.get(groupId)!;
+      }
+      return { ...n, id: generateId(), x: n.x + OFFSET, y: n.y + OFFSET, groupId };
+    });
+    const newScene = { ...sceneRef.current, nodes: [...sceneRef.current.nodes, ...duped] };
+    setScene(newScene);
+    handleSceneChange(newScene, viewportRef.current);
+    setSelectedNodeIds(new Set(duped.map(n => n.id)));
+  }, [selectedNodeIds, setScene, handleSceneChange]);
+
+  const handleUpdateSelectionFill = useCallback((color: string) => {
+    const ids = selectedNodeIds;
+    if (ids.size === 0) return;
+    const newScene = { ...sceneRef.current, nodes: sceneRef.current.nodes.map(n => {
+      if (!ids.has(n.id)) return n;
+      if (n.type === 'path' && n.path) return { ...n, path: { ...n.path, fill: color } };
+      if (n.type === 'text') return { ...n, color };
+      return { ...n, fill: color };
+    })};
+    setScene(newScene);
+    handleSceneChange(newScene, viewportRef.current);
+  }, [selectedNodeIds, setScene, handleSceneChange]);
+
+  const handleUpdateSelectionStroke = useCallback((color: string) => {
+    const ids = selectedNodeIds;
+    if (ids.size === 0) return;
+    const newScene = { ...sceneRef.current, nodes: sceneRef.current.nodes.map(n => {
+      if (!ids.has(n.id)) return n;
+      if (n.type === 'path' && n.path) return { ...n, path: { ...n.path, stroke: color } };
+      return { ...n, stroke: color };
+    })};
+    setScene(newScene);
+    handleSceneChange(newScene, viewportRef.current);
+  }, [selectedNodeIds, setScene, handleSceneChange]);
 
   // Scene audio
   const handleAddAudio = useCallback(() => {
@@ -748,6 +798,7 @@ export default function App({ initialState, settings }: AppProps) {
         setSelectedNodeIds(new Set(pasted.map(n => n.id)));
         return;
       }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'd') { e.preventDefault(); handleDuplicate(); return; }
       if (e.key === 'Escape') {
         canvasHandleRef.current?.cancelStroke();
         const stack = sceneStackRef.current;
@@ -756,10 +807,7 @@ export default function App({ initialState, settings }: AppProps) {
         return;
       }
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNodeIds.size > 0) {
-        const newScene = { ...sceneRef.current, nodes: sceneRef.current.nodes.filter(n => !selectedNodeIds.has(n.id)) };
-        setScene(newScene);
-        handleSceneChange(newScene, viewport);
-        setSelectedNodeIds(new Set());
+        handleDeleteSelected();
         return;
       }
       if (!e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -779,7 +827,7 @@ export default function App({ initialState, settings }: AppProps) {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [handleUndo, handleRedo, navigateTo, selectedNodeIds, viewport, setScene, handleSceneChange, handleManualSave]);
+  }, [handleUndo, handleRedo, navigateTo, selectedNodeIds, viewport, setScene, handleSceneChange, handleManualSave, handleDeleteSelected, handleDuplicate]);
 
   const selectedNodes = scene.nodes.filter(n => selectedNodeIds.has(n.id));
   const singleSelection = selectedNodes.length === 1 ? selectedNodes[0] : null;
@@ -790,6 +838,25 @@ export default function App({ initialState, settings }: AppProps) {
   const sceneLayers = ensureLayers(scene);
   const sceneCatalog = buildSceneCatalog(rootSceneRef.current);
   const zoomPercent = Math.round(viewport.scale * 100);
+
+  // Selection bar computed values
+  const selHasShapes = selectedNodes.some(n => n.type === 'rect' || n.type === 'circle' || n.type === 'path');
+  const selAllText = selectedNodes.length > 0 && selectedNodes.every(n => n.type === 'text');
+  const selFill = (() => {
+    const s = selectedNodes.find(n => n.type === 'rect' || n.type === 'circle');
+    if (s?.fill && s.fill !== 'none') return s.fill;
+    const p = selectedNodes.find(n => n.type === 'path');
+    if (p?.path?.fill && p.path.fill !== 'none') return p.path.fill;
+    return '#ffffff';
+  })();
+  const selStroke = (() => {
+    const s = selectedNodes.find(n => n.type === 'rect' || n.type === 'circle');
+    if (s?.stroke && s.stroke !== 'none') return s.stroke;
+    const p = selectedNodes.find(n => n.type === 'path');
+    if (p?.path?.stroke && p.path.stroke !== 'none') return p.path.stroke;
+    return '#000000';
+  })();
+  const selTextColor = selectedNodes.find(n => n.type === 'text')?.color ?? '#1a1a2e';
 
   return (
     <div className="fixed inset-0 overflow-hidden bg-paper" style={{ fontFamily: 'system-ui, sans-serif' }}>
@@ -1081,46 +1148,55 @@ export default function App({ initialState, settings }: AppProps) {
         />
       )}
 
-      {/* Multi-select quick property bar */}
-      {hasMultiSelection && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3 px-4 py-2 bg-ink/90 backdrop-blur-sm border border-white/10 rounded-xl text-xs text-gray-300 shadow-xl">
-          <span className="text-gray-500">{selectedNodes.length} selected</span>
-          <div className="w-px h-4 bg-white/20" />
-          <label className="flex items-center gap-1.5 cursor-pointer">
-            <span className="text-gray-400">Fill</span>
-            <input type="color"
-              value={selectedNodes[0]?.fill ?? selectedNodes[0]?.path?.fill ?? '#ffffff'}
-              onChange={e => {
-                const color = e.target.value;
-                const ids = selectedNodeIds;
-                const newScene = { ...sceneRef.current, nodes: sceneRef.current.nodes.map(n => {
-                  if (!ids.has(n.id)) return n;
-                  if (n.type === 'path' && n.path) return { ...n, path: { ...n.path, fill: color } };
-                  if (n.type === 'text') return { ...n, color };
-                  return { ...n, fill: color };
-                })};
-                setScene(newScene);
-                handleSceneChange(newScene, viewportRef.current);
-              }}
-              className="w-7 h-6 rounded border border-white/20 bg-transparent cursor-pointer" />
-          </label>
-          <label className="flex items-center gap-1.5 cursor-pointer">
-            <span className="text-gray-400">Stroke</span>
-            <input type="color"
-              value={selectedNodes[0]?.stroke ?? selectedNodes[0]?.path?.stroke ?? '#000000'}
-              onChange={e => {
-                const color = e.target.value;
-                const ids = selectedNodeIds;
-                const newScene = { ...sceneRef.current, nodes: sceneRef.current.nodes.map(n => {
-                  if (!ids.has(n.id)) return n;
-                  if (n.type === 'path' && n.path) return { ...n, path: { ...n.path, stroke: color } };
-                  return { ...n, stroke: color };
-                })};
-                setScene(newScene);
-                handleSceneChange(newScene, viewportRef.current);
-              }}
-              className="w-7 h-6 rounded border border-white/20 bg-transparent cursor-pointer" />
-          </label>
+      {/* Unified selection action bar */}
+      {hasSelection && !viewerMode && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-0.5 px-2 py-1.5 bg-ink/95 backdrop-blur-sm border border-white/10 rounded-2xl shadow-xl">
+          {/* Fill color — shapes & paths */}
+          {selHasShapes && (
+            <label className="flex items-center gap-1 px-1.5 cursor-pointer" title="Remplissage">
+              <span className="text-[11px] text-gray-500 select-none">▣</span>
+              <input type="color" value={selFill}
+                onChange={e => handleUpdateSelectionFill(e.target.value)}
+                className="w-7 h-7 rounded-lg border border-white/20 cursor-pointer bg-transparent p-0" />
+            </label>
+          )}
+          {/* Text color */}
+          {selAllText && (
+            <label className="flex items-center gap-1 px-1.5 cursor-pointer" title="Couleur du texte">
+              <span className="text-[11px] text-gray-500 select-none font-bold">A</span>
+              <input type="color" value={selTextColor}
+                onChange={e => handleUpdateSelectionFill(e.target.value)}
+                className="w-7 h-7 rounded-lg border border-white/20 cursor-pointer bg-transparent p-0" />
+            </label>
+          )}
+          {/* Stroke color — shapes & paths */}
+          {selHasShapes && (
+            <label className="flex items-center gap-1 px-1.5 cursor-pointer" title="Contour">
+              <span className="text-[11px] text-gray-500 select-none">○</span>
+              <input type="color" value={selStroke}
+                onChange={e => handleUpdateSelectionStroke(e.target.value)}
+                className="w-7 h-7 rounded-lg border border-white/20 cursor-pointer bg-transparent p-0" />
+            </label>
+          )}
+          {/* Count badge */}
+          {hasMultiSelection && (
+            <span className="text-gray-600 text-[10px] px-1 select-none tabular-nums">{selectedNodes.length}</span>
+          )}
+          <div className="w-px h-5 bg-white/15 mx-0.5" />
+          {/* Duplicate */}
+          <button onClick={handleDuplicate}
+            className="w-9 h-9 flex items-center justify-center rounded-xl text-gray-400 active:text-white active:bg-white/10 touch-manipulation transition-colors text-base"
+            title="Dupliquer (⌘D)">⎘</button>
+          {/* Properties — single only */}
+          {singleSelection && (
+            <button onClick={() => setShowProperties(v => !v)}
+              className={`w-9 h-9 flex items-center justify-center rounded-xl touch-manipulation transition-colors text-sm ${showProperties ? 'bg-accent/20 text-accent' : 'text-gray-400 active:text-white active:bg-white/10'}`}
+              title="Propriétés">⚙</button>
+          )}
+          {/* Delete */}
+          <button onClick={handleDeleteSelected}
+            className="w-9 h-9 flex items-center justify-center rounded-xl text-red-400/70 active:text-red-300 active:bg-red-400/10 touch-manipulation transition-colors text-base"
+            title="Supprimer (Delete)">✕</button>
         </div>
       )}
 
