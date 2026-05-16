@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { SceneNode, Hotspot, NodeAnimation, SceneAudio } from '../types/scene';
 import { SceneCatalogEntry } from '../engine/scene-graph';
 
@@ -21,6 +21,15 @@ export function PropertiesPanel({ node, sceneCatalog, currentSceneId, onUpdate, 
   const isText = node.type === 'text';
   const isImage = node.type === 'image';
   const [activeTab, setActiveTab] = useState<Tab>(isText ? 'text' : isImage ? 'image' : 'hotspot');
+  const [savedFlash, setSavedFlash] = useState(false);
+  const savedTimerRef = useRef<number | null>(null);
+
+  const onUpdateWithFeedback = useCallback((updates: Partial<SceneNode>) => {
+    onUpdate(updates);
+    setSavedFlash(true);
+    if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
+    savedTimerRef.current = window.setTimeout(() => { setSavedFlash(false); savedTimerRef.current = null; }, 1200);
+  }, [onUpdate]);
 
   const tabs: Tab[] = isText
     ? ['text', 'hotspot', 'portal', 'anim', 'audio']
@@ -34,7 +43,10 @@ export function PropertiesPanel({ node, sceneCatalog, currentSceneId, onUpdate, 
 
   return (
     <div className="fixed right-0 top-12 bottom-0 w-full sm:w-64 bg-ink/95 border-l border-white/10 text-white text-xs overflow-y-auto z-10 flex flex-col">
-      <div className="flex border-b border-white/10 flex-shrink-0">
+      <div className="flex items-center border-b border-white/10 flex-shrink-0">
+        {savedFlash && (
+          <span className="ml-2 text-green-400 text-[10px] font-medium animate-pulse flex-shrink-0">✓</span>
+        )}
         {tabs.map(tab => (
           <button
             key={tab}
@@ -55,19 +67,19 @@ export function PropertiesPanel({ node, sceneCatalog, currentSceneId, onUpdate, 
 
       <div className="flex-1 p-3 flex flex-col gap-3">
         {activeTab === 'text' && isText && (
-          <TextEditor node={node} onUpdate={onUpdate} />
+          <TextEditor node={node} onUpdate={onUpdateWithFeedback} />
         )}
         {activeTab === 'image' && isImage && (
-          <ImageEditor node={node} onUpdate={onUpdate} />
+          <ImageEditor node={node} onUpdate={onUpdateWithFeedback} />
         )}
         {activeTab === 'hotspot' && (
-          <HotspotEditor hotspot={node.hotspot} onChange={hs => onUpdate({ hotspot: hs })} />
+          <HotspotEditor hotspot={node.hotspot} onChange={hs => onUpdateWithFeedback({ hotspot: hs })} />
         )}
         {activeTab === 'portal' && (
-          <PortalEditor portal={node.portal} catalog={sceneCatalog} currentSceneId={currentSceneId} nodeId={node.id} onChange={p => onUpdate({ portal: p })} />
+          <PortalEditor portal={node.portal} catalog={sceneCatalog} currentSceneId={currentSceneId} nodeId={node.id} onChange={p => onUpdateWithFeedback({ portal: p })} />
         )}
         {activeTab === 'anim' && (
-          <AnimEditor anim={node.animation} onChange={a => onUpdate({ animation: a })} />
+          <AnimEditor anim={node.animation} onChange={a => onUpdateWithFeedback({ animation: a })} />
         )}
         {activeTab === 'audio' && (
           <AudioEditor audio={currentSceneAudio} onUpdate={onUpdateSceneAudio} onAdd={onAddAudio} />
