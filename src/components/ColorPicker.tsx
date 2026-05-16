@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 const PALETTE = [
   '#1a1a2e', '#0f3460', '#704214', '#2d4a2b', '#6b1f1f', '#3a2c4a', '#4a3b1f', '#1f3a4a',
@@ -66,6 +66,7 @@ export function ColorPicker({ value, onChange, swatchClassName, title, showFillT
   const [open, setOpen] = useState(false);
   const [recent, setRecent] = useState<string[]>(loadRecent);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({ left: '3rem', top: 0 });
 
   const isNone = value === 'none' || !value;
   const parsed = isNone ? { hex: '#1a1a2e', alpha: 1 } : parseColor(value);
@@ -80,6 +81,31 @@ export function ColorPicker({ value, onChange, swatchClassName, title, showFillT
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
     window.addEventListener('pointerdown', onClick);
     window.addEventListener('keydown', onKey);
+
+    // Compute smart panel position to stay within viewport
+    if (wrapRef.current) {
+      const rect = wrapRef.current.getBoundingClientRect();
+      const panelH = 300;
+      const panelW = 224;
+      const style: React.CSSProperties = {};
+      // Horizontal: prefer opening right, flip left if no room
+      if (rect.right + panelW + 4 > window.innerWidth) {
+        style.right = 0;
+        style.left = 'auto';
+      } else {
+        style.left = '100%';
+        style.marginLeft = '8px';
+      }
+      // Vertical: prefer top-aligned, flip up if no room below
+      if (rect.bottom + panelH > window.innerHeight) {
+        style.bottom = 0;
+        style.top = 'auto';
+      } else {
+        style.top = 0;
+      }
+      setPanelStyle(style);
+    }
+
     return () => {
       window.removeEventListener('pointerdown', onClick);
       window.removeEventListener('keydown', onKey);
@@ -108,7 +134,7 @@ export function ColorPicker({ value, onChange, swatchClassName, title, showFillT
         onClick={() => setOpen(o => !o)}
       />
       {open && (
-        <div className="absolute left-12 top-0 z-50 bg-ink/95 backdrop-blur-sm rounded-xl shadow-2xl border border-white/10 p-3 w-56">
+        <div className="absolute z-50 bg-ink/95 backdrop-blur-sm rounded-xl shadow-2xl border border-white/10 p-3 w-56" style={panelStyle}>
           {recent.length > 0 && (
             <>
               <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">Recent</div>

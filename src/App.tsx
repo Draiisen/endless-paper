@@ -103,6 +103,7 @@ export default function App({ initialState, settings }: AppProps) {
   const canvasHandleRef = useRef<CanvasHandle | null>(null);
   const lodCancelsRef = useRef<Set<() => void>>(new Set());
   const clipboardRef = useRef<import('./types/scene').SceneNode[]>([]);
+  const bookmarksContainerRef = useRef<HTMLDivElement>(null);
 
   const history = useHistory(initScene, initViewport);
   const [scene, setSceneState] = useState<Scene>(initScene);
@@ -119,12 +120,16 @@ export default function App({ initialState, settings }: AppProps) {
   useEffect(() => { viewportRef.current = viewport; }, [viewport]);
   useEffect(() => { assetsRef.current = assets; }, [assets]);
 
-  // Close bookmarks popover on outside click
+  // Close bookmarks popover only when clicking outside its container
   useEffect(() => {
     if (!showBookmarks) return;
-    const handler = () => setShowBookmarks(false);
-    window.addEventListener('pointerdown', handler);
-    return () => window.removeEventListener('pointerdown', handler);
+    const handler = (e: PointerEvent) => {
+      if (bookmarksContainerRef.current && !bookmarksContainerRef.current.contains(e.target as Node)) {
+        setShowBookmarks(false);
+      }
+    };
+    window.addEventListener('pointerdown', handler, { capture: true });
+    return () => window.removeEventListener('pointerdown', handler, { capture: true });
   }, [showBookmarks]);
 
   // Sync active layer when scene changes
@@ -743,6 +748,48 @@ export default function App({ initialState, settings }: AppProps) {
     setTool('select');
   }, [viewport, activeLayerId, setScene, handleSceneChange, applyLodResult]);
 
+  const handleDropImageFile = useCallback((file: File, worldX: number, worldY: number) => {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string;
+      const img = new Image();
+      img.onerror = () => {
+        setErrorToast('Impossible de charger cette image.');
+        setTimeout(() => setErrorToast(null), 3500);
+      };
+      img.onload = () => {
+        const maxW = 400; const maxH = 300;
+        let w = img.naturalWidth; let h = img.naturalHeight;
+        if (w > maxW || h > maxH) { const r = Math.min(maxW / w, maxH / h); w = Math.round(w * r); h = Math.round(h * r); }
+        const node = createNode('image', worldX - w / 2, worldY - h / 2, w, h);
+        node.imageData = dataUrl;
+        node.layerId = activeLayerId || undefined;
+        let thumbnail: string | undefined;
+        try { thumbnail = generateThumbnail(img); } catch { thumbnail = undefined; }
+        node.lod = { thumbnail, sourceW: 0, sourceH: 0, naturalW: img.naturalWidth, naturalH: img.naturalHeight };
+        const newScene = addNode(sceneRef.current, node);
+        setScene(newScene);
+        handleSceneChange(newScene, viewportRef.current);
+        if (imageHintTimerRef.current) window.clearTimeout(imageHintTimerRef.current);
+        setShowImageHint(true);
+        imageHintTimerRef.current = window.setTimeout(() => { setShowImageHint(false); imageHintTimerRef.current = null; }, 4500);
+        try {
+          setLodProcessingCount(c => c + 1);
+          let cancelFn: () => void = () => {};
+          cancelFn = requestColorVectorization(node, img, 10, (nodeId, lod) => {
+            lodCancelsRef.current.delete(cancelFn);
+            setLodProcessingCount(c => Math.max(0, c - 1));
+            applyLodResult(nodeId, lod);
+          });
+          lodCancelsRef.current.add(cancelFn);
+        } catch { setLodProcessingCount(c => Math.max(0, c - 1)); }
+      };
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+    setTool('select');
+  }, [activeLayerId, setScene, handleSceneChange, applyLodResult]);
+
   const loadTemplate = useCallback((name: TemplateName) => {
     const cx = (window.innerWidth / 2 - viewport.x) / viewport.scale;
     const cy = (window.innerHeight / 2 - viewport.y) / viewport.scale;
@@ -816,26 +863,35 @@ export default function App({ initialState, settings }: AppProps) {
   }, [setScene, handleSceneChange]);
 
   const handleFitAll = useCallback(() => {
-    const nodes = sceneRef.current.nodes;
-    if (nodes.length === 0) {
+    const cur = sceneRef.current;
+    let fitX: number, fitY: number, fitW: number, fitH: number;
+
+    if (cur.bounds) {
+      fitX = -cur.bounds.width / 2;
+      fitY = -cur.bounds.height / 2;
+      fitW = cur.bounds.width;
+      fitH = cur.bounds.height;
+    } else if (cur.nodes.length > 0) {
+      const xs = cur.nodes.flatMap(n => [n.x, n.x + n.width]);
+      const ys = cur.nodes.flatMap(n => [n.y, n.y + n.height]);
+      fitX = Math.min(...xs); fitY = Math.min(...ys);
+      fitW = Math.max(...xs) - fitX; fitH = Math.max(...ys) - fitY;
+    } else {
       const vp = makeInitialViewport();
       setViewport(vp);
       viewportRef.current = vp;
       return;
     }
-    const xs = nodes.flatMap(n => [n.x, n.x + n.width]);
-    const ys = nodes.flatMap(n => [n.y, n.y + n.height]);
-    const minX = Math.min(...xs), maxX = Math.max(...xs);
-    const minY = Math.min(...ys), maxY = Math.max(...ys);
+
     const tbW = toolbarCollapsed ? 36 : 56;
     const cw = Math.max(100, window.innerWidth - tbW);
     const ch = Math.max(100, window.innerHeight - 48);
-    const contentW = Math.max(1, maxX - minX);
-    const contentH = Math.max(1, maxY - minY);
-    const scale = Math.min(cw / contentW * 0.88, ch / contentH * 0.88, 4);
-    const cx = (minX + maxX) / 2;
-    const cy = (minY + maxY) / 2;
-    const vp: Viewport = { scale, x: tbW + cw / 2 - cx * scale, y: 48 + ch / 2 - cy * scale };
+    const scale = Math.min(cw / Math.max(1, fitW) * 0.88, ch / Math.max(1, fitH) * 0.88, 4);
+    const vp: Viewport = {
+      scale,
+      x: tbW + cw / 2 - (fitX + fitW / 2) * scale,
+      y: 48 + ch / 2 - (fitY + fitH / 2) * scale,
+    };
     setViewport(vp);
     viewportRef.current = vp;
   }, [toolbarCollapsed]);
@@ -986,6 +1042,7 @@ export default function App({ initialState, settings }: AppProps) {
         viewerMode={viewerMode}
         onHotspotClick={handleNodeClick}
         onDropAsset={handleDropAsset}
+        onDropImageFile={handleDropImageFile}
       />
 
       <Toolbar
@@ -1136,7 +1193,7 @@ export default function App({ initialState, settings }: AppProps) {
               <button onClick={handleSetStartCamera} title="Définir la vue de départ" className="px-2 py-1 rounded text-xs text-gray-400 hover:text-white hover:bg-white/10 transition-colors">🎯</button>
               {getRootScene().startCamera && <button onClick={handleResetToStart} title="Revenir à la vue de départ" className="px-2 py-1 rounded text-xs text-gray-400 hover:text-white hover:bg-white/10 transition-colors">⟳</button>}
               {(scene.cameras?.length ?? 0) > 0 && (
-                <div className="relative">
+                <div className="relative" ref={bookmarksContainerRef}>
                   <button
                     onClick={() => setShowBookmarks(v => !v)}
                     title="Vues sauvegardées"

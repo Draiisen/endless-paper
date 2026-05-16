@@ -36,23 +36,35 @@ function findSceneById(root: import('../types/scene').Scene, targetId: string): 
   return null;
 }
 
-/** Compute the lens transform (inner-world → world-1 canvas coords) for a node's inner scene. */
+/** Compute the lens transform (inner-world → world-1 canvas coords) for a node's inner scene.
+ * Must match drawLens() in renderer exactly — uses scene.bounds if set, else content bbox.
+ */
 function computeLensTransform(
   node: import('../types/scene').SceneNode,
-  innerNodes: import('../types/scene').SceneNode[],
+  inner: { nodes: import('../types/scene').SceneNode[]; bounds?: { width: number; height: number } },
 ): { s: number; ox: number; oy: number } | null {
-  if (innerNodes.length === 0) return null;
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const n of innerNodes) {
-    minX = Math.min(minX, n.x); minY = Math.min(minY, n.y);
-    maxX = Math.max(maxX, n.x + n.width); maxY = Math.max(maxY, n.y + n.height);
+  let fitX: number, fitY: number, fitW: number, fitH: number;
+
+  if (inner.bounds) {
+    fitX = -inner.bounds.width / 2;
+    fitY = -inner.bounds.height / 2;
+    fitW = inner.bounds.width;
+    fitH = inner.bounds.height;
+  } else {
+    if (inner.nodes.length === 0) return null;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const n of inner.nodes) {
+      minX = Math.min(minX, n.x); minY = Math.min(minY, n.y);
+      maxX = Math.max(maxX, n.x + n.width); maxY = Math.max(maxY, n.y + n.height);
+    }
+    fitX = minX; fitY = minY; fitW = maxX - minX; fitH = maxY - minY;
+    if (fitW <= 0 || fitH <= 0) return null;
   }
-  const bw = maxX - minX, bh = maxY - minY;
-  if (bw <= 0 || bh <= 0) return null;
+
   const pad = 0.05;
-  const s = Math.min(node.width * (1 - pad * 2) / bw, node.height * (1 - pad * 2) / bh);
-  const ox = node.x + node.width  / 2 - (minX + bw / 2) * s;
-  const oy = node.y + node.height / 2 - (minY + bh / 2) * s;
+  const s = Math.min(node.width * (1 - pad * 2) / fitW, node.height * (1 - pad * 2) / fitH);
+  const ox = node.x + node.width  / 2 - (fitX + fitW / 2) * s;
+  const oy = node.y + node.height / 2 - (fitY + fitH / 2) * s;
   return { s, ox, oy };
 }
 
@@ -101,6 +113,7 @@ interface CanvasProps {
   viewerMode?: boolean;
   onHotspotClick?: (node: SceneNode, viewport: Viewport) => boolean;
   onDropAsset?: (assetId: string, worldX: number, worldY: number) => void;
+  onDropImageFile?: (file: File, worldX: number, worldY: number) => void;
 }
 
 interface TextEditState {
@@ -130,13 +143,14 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   viewerMode = false,
   onHotspotClick,
   onDropAsset,
+  onDropImageFile,
 }, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number>(0);
   const needsRenderRef = useRef(true);
   const isDirtyRef = useRef(false);
   const [isVectorizing, setIsVectorizing] = useState(false);
-  const [dropError, setDropError] = useState<string | null>(null);
+  const [dropError] = useState<string | null>(null);
   const [textEdit, setTextEdit] = useState<TextEditState | null>(null);
   const textCommittedRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -353,10 +367,9 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
       const updatedNode = ensureInnerScene(node);
       const updatedScene = updateNode(sceneRef.current, node.id, { innerScene: updatedNode.innerScene });
       const stack = sceneStackRef.current;
-      const innerNodes = updatedNode.innerScene?.nodes ?? [];
 
       // Compute lens transform (same math as drawLens in renderer)
-      const lt = computeLensTransform(node, innerNodes);
+      const lt = computeLensTransform(node, updatedNode.innerScene!);
       const vp = viewportRef.current;
 
       // innerVp: world-2 viewport so inner content appears at exact same screen position
@@ -1123,7 +1136,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
     }
 
     if (enterNode && enterRatio > LENS_FADE_START) {
-      const lt = computeLensTransform(enterNode, enterNode.innerScene!.nodes);
+      const lt = computeLensTransform(enterNode, enterNode.innerScene!);
       if (lt) {
         const progress = Math.min(1, (enterRatio - LENS_FADE_START) / (LENS_FADE_FULL - LENS_FADE_START));
         crossfadeRef.current = {
@@ -1240,37 +1253,10 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
 
     const dropWorld = screenToWorld(e.clientX, e.clientY, viewportRef.current);
 
-    files.forEach(file => {
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        const dataUrl = ev.target?.result as string;
-        const img = new Image();
-        img.onerror = () => {
-          setDropError('Impossible de charger cette image.');
-          setTimeout(() => setDropError(null), 3500);
-        };
-        img.onload = () => {
-          const maxW = 400 / viewportRef.current.scale;
-          const maxH = 300 / viewportRef.current.scale;
-          let w = img.naturalWidth;
-          let h = img.naturalHeight;
-          if (w > maxW || h > maxH) {
-            const r = Math.min(maxW / w, maxH / h);
-            w *= r; h *= r;
-          }
-          const node = createNode('image', dropWorld.x - w / 2, dropWorld.y - h / 2, w, h);
-          node.imageData = dataUrl;
-          if (activeLayerIdRef.current) node.layerId = activeLayerIdRef.current;
-          const newScene = addNode(sceneRef.current, node);
-          setScene(newScene);
-          onSceneChange(newScene, viewportRef.current);
-          markDirty();
-        };
-        img.src = dataUrl;
-      };
-      reader.readAsDataURL(file);
-    });
-  }, [setScene, onSceneChange, markDirty]);
+    if (onDropImageFile) {
+      files.forEach(file => onDropImageFile(file, dropWorld.x, dropWorld.y));
+    }
+  }, [onDropImageFile, onDropAsset]);
 
   // Vectorize the selected image node
   const vectorizeSelected = useCallback(async () => {
