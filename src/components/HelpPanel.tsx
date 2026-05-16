@@ -52,6 +52,13 @@ export function HelpPanel({ onClose }: { onClose: () => void }) {
             <Row label="Mode Viewer ✎" desc="Bouton en haut — active hotspots et portals" />
           </Section>
 
+          <Section title="🗺 Taille du monde">
+            <Row label="Par scène" desc="Chaque monde peut avoir sa propre taille. Ce réglage ne limite pas tous les mondes du projet." />
+            <Row label="Scènes imbriquées" desc="Entrez dans une scène imbriquée pour régler sa taille — les autres mondes ne sont pas affectés." />
+            <Row label="∞ Canvas libre" desc="Sans limite visuelle — le canvas est infini dans toutes les directions." />
+            <Row label="Repérage & export" desc="Les limites servent au Fit All, aux présentations, aux lentilles et aux exports." />
+          </Section>
+
           <Section title="⌨️ Raccourcis (desktop)">
             <Row label="Ctrl+Z / Ctrl+Y" desc="Annuler / Refaire" />
             <Row label="Ctrl+C / Ctrl+V" desc="Copier / Coller la sélection" />

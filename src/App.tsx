@@ -20,6 +20,7 @@ import { HelpPanel } from './components/HelpPanel';
 import { StampPanel } from './components/StampPanel';
 import { createTemplate, TemplateName } from './engine/templates';
 import { ColorPicker } from './components/ColorPicker';
+import { WorldSizeSheet, getWorldSizeShort } from './components/WorldSizeSheet';
 
 function makeInitialViewport(): Viewport {
   return { x: window.innerWidth / 2 - 200, y: window.innerHeight / 2 - 150, scale: 1 };
@@ -92,6 +93,8 @@ export default function App({ initialState, settings }: AppProps) {
   const [showImageHint, setShowImageHint] = useState(false);
   const [showBookmarks, setShowBookmarks] = useState(false);
   const [showFirstRunHint, setShowFirstRunHint] = useState(false);
+  const [showWorldSizeSheet, setShowWorldSizeSheet] = useState(false);
+  const [worldSizeToast, setWorldSizeToast] = useState<string | null>(null);
   const [stamps, setStamps] = useState<import('./types/scene').BrushStamp[]>(initialState?.brushStamps ?? []);
   const [activeStampId, setActiveStampId] = useState<string | null>(null);
 
@@ -101,6 +104,7 @@ export default function App({ initialState, settings }: AppProps) {
   const autoSaveTimerRef = useRef<number | null>(null);
   const imageHintTimerRef = useRef<number | null>(null);
   const firstRunHintTimerRef = useRef<number | null>(null);
+  const worldSizeToastTimerRef = useRef<number | null>(null);
   const stampsRef = useRef(stamps);
   useEffect(() => { stampsRef.current = stamps; }, [stamps]);
   const tourStopRef = useRef<(() => void) | null>(null);
@@ -900,6 +904,36 @@ export default function App({ initialState, settings }: AppProps) {
     handleSceneChange(newScene, viewportRef.current);
   }, [setScene, handleSceneChange]);
 
+  const handleWorldSizeSelect = useCallback((bounds: { width: number; height: number } | null, presetLabel: string) => {
+    handleSetSceneBounds(bounds);
+    // handleFitAll reads sceneRef.current which is synchronously updated by handleSetSceneBounds
+    const cur = { ...sceneRef.current, bounds: bounds ?? undefined };
+    let fitX: number, fitY: number, fitW: number, fitH: number;
+    if (cur.bounds) {
+      fitX = -cur.bounds.width / 2; fitY = -cur.bounds.height / 2;
+      fitW = cur.bounds.width; fitH = cur.bounds.height;
+    } else if (cur.nodes.length > 0) {
+      const xs = cur.nodes.flatMap(n => [n.x, n.x + n.width]);
+      const ys = cur.nodes.flatMap(n => [n.y, n.y + n.height]);
+      fitX = Math.min(...xs); fitY = Math.min(...ys);
+      fitW = Math.max(...xs) - fitX; fitH = Math.max(...ys) - fitY;
+    } else {
+      fitX = -200; fitY = -150; fitW = 400; fitH = 300;
+    }
+    const tbW = toolbarCollapsed ? 36 : 56;
+    const cw = Math.max(100, window.innerWidth - tbW);
+    const ch = Math.max(100, window.innerHeight - 48);
+    const scale = Math.min(cw / Math.max(1, fitW) * 0.88, ch / Math.max(1, fitH) * 0.88, 4);
+    const vp = { scale, x: tbW + cw / 2 - (fitX + fitW / 2) * scale, y: 48 + ch / 2 - (fitY + fitH / 2) * scale };
+    setViewport(vp);
+    viewportRef.current = vp;
+    setShowWorldSizeSheet(false);
+    setShowMobileMenu(false);
+    if (worldSizeToastTimerRef.current !== null) window.clearTimeout(worldSizeToastTimerRef.current);
+    setWorldSizeToast(presetLabel);
+    worldSizeToastTimerRef.current = window.setTimeout(() => setWorldSizeToast(null), 2500);
+  }, [handleSetSceneBounds, toolbarCollapsed]);
+
   const handleFitAll = useCallback(() => {
     const cur = sceneRef.current;
     let fitX: number, fitY: number, fitW: number, fitH: number;
@@ -1267,6 +1301,13 @@ export default function App({ initialState, settings }: AppProps) {
               <button onClick={() => setShowHelp(true)} className="p-1.5 rounded text-gray-400 hover:text-white hover:bg-white/10 transition-colors" title="Aide">?</button>
             </div>
 
+            {/* World size indicator — mobile only, always visible in top bar */}
+            <span
+              className="sm:hidden text-[10px] font-mono text-gray-500 flex-shrink-0 select-none"
+              data-testid="world-size-topbar-label"
+              title="Taille du monde actuel"
+            >{getWorldSizeShort(scene.bounds)}</span>
+
             {/* Mobile overflow menu button */}
             <button
               className="sm:hidden p-2 rounded text-gray-300 active:text-white active:bg-white/10 flex-shrink-0 touch-manipulation text-lg leading-none"
@@ -1350,26 +1391,21 @@ export default function App({ initialState, settings }: AppProps) {
               </div>
             </div>
 
-            {/* Taille du monde */}
-            <div className="flex flex-col gap-1 px-3 py-2">
-              <span className="text-gray-400 text-xs">Délimitation</span>
-              <div className="flex gap-1 flex-wrap">
-                {([
-                  { label: '∞', bounds: null },
-                  { label: '16:9', bounds: { width: 1920, height: 1080 } },
-                  { label: 'A4↕', bounds: { width: 2480, height: 3508 } },
-                  { label: 'A4↔', bounds: { width: 3508, height: 2480 } },
-                ] as const).map(p => {
-                  const active = p.bounds === null ? !scene.bounds : (scene.bounds?.width === p.bounds.width && scene.bounds?.height === p.bounds.height);
-                  return (
-                    <button key={p.label} onClick={() => handleSetSceneBounds(p.bounds)}
-                      className={`px-2.5 py-1 text-xs rounded touch-manipulation transition-colors ${active ? 'bg-accent text-white' : 'bg-white/10 text-gray-300 active:text-white'}`}>
-                      {p.label}
-                    </button>
-                  );
-                })}
+            {/* Taille du monde — ouvre la bottom sheet */}
+            <button
+              data-testid="mobile-world-size-button"
+              onClick={() => setShowWorldSizeSheet(true)}
+              className="flex items-center justify-between px-3 py-3 rounded-lg text-sm text-gray-200 active:bg-white/10 touch-manipulation"
+            >
+              <div className="flex items-center gap-3">
+                <span>⊞</span>
+                <span>Taille du monde actuel</span>
               </div>
-            </div>
+              <span
+                className={`text-xs font-mono px-1.5 py-0.5 rounded ${scene.bounds ? 'bg-accent/20 text-accent' : 'text-gray-500'}`}
+                data-testid="world-size-current-label"
+              >{getWorldSizeShort(scene.bounds)}</span>
+            </button>
 
             <div className="h-px bg-white/10" />
 
@@ -1648,6 +1684,25 @@ export default function App({ initialState, settings }: AppProps) {
       )}
 
       {showHelp && <HelpPanel onClose={() => setShowHelp(false)} />}
+
+      {/* World size bottom sheet — mobile */}
+      {showWorldSizeSheet && (
+        <WorldSizeSheet
+          sceneBounds={scene.bounds}
+          sceneLabel={sceneStack[sceneStack.length - 1]?.label ?? 'World'}
+          onSelect={handleWorldSizeSelect}
+          onClose={() => setShowWorldSizeSheet(false)}
+        />
+      )}
+
+      {/* World size toast */}
+      {worldSizeToast && (
+        <div className="fixed left-1/2 -translate-x-1/2 z-50 pointer-events-none select-none" style={{ bottom: 'calc(5rem + env(safe-area-inset-bottom, 0px))' }}>
+          <div className="bg-ink/95 backdrop-blur-sm border border-white/10 rounded-full px-4 py-2 shadow-xl text-white text-xs whitespace-nowrap">
+            {worldSizeToast.startsWith('∞') ? 'Aucune limite pour ce monde' : `Taille du monde : ${worldSizeToast}`}
+          </div>
+        </div>
+      )}
 
       {errorToast && (
         <div className="fixed left-1/2 top-20 -translate-x-1/2 bg-red-600/90 text-white text-xs px-4 py-2 rounded-full backdrop-blur-sm z-50 pointer-events-none">

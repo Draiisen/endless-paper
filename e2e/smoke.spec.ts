@@ -512,6 +512,163 @@ test('ExportModal — SVG download is valid and contains seeded node fill', asyn
   expect(content).toContain('#e74c3c');
 });
 
+// ── World size sheet tests ────────────────────────────────────────────────────
+
+test('world-size sheet — mobile sets 16:9 bounds on root scene', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await seedLocalStorage(page);
+  await page.goto('/');
+  await waitForCanvas(page);
+
+  // Open ⋮ menu
+  await page.click('button[title="More"]');
+  await page.waitForTimeout(200);
+
+  // Click the world-size button to open the sheet
+  await page.click('[data-testid="mobile-world-size-button"]');
+  await page.waitForSelector('[data-testid="world-size-sheet"]', { timeout: 3000 });
+
+  // Choose 16:9
+  await page.click('[data-testid="world-size-option-16-9"]');
+  await page.waitForTimeout(800); // autosave debounce
+
+  // Sheet should be dismissed
+  await expect(page.locator('[data-testid="world-size-sheet"]')).not.toBeVisible();
+
+  // Verify bounds in IDB
+  const bounds = await page.evaluate(async () => {
+    return new Promise<{ width: number; height: number } | undefined>((resolve) => {
+      const req = indexedDB.open('endless-paper', 1);
+      req.onsuccess = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains('state')) { resolve(undefined); return; }
+        const tx = db.transaction('state', 'readonly');
+        const gr = tx.objectStore('state').get('autosave');
+        gr.onsuccess = () => resolve((gr.result as any)?.rootScene?.bounds);
+        gr.onerror = () => resolve(undefined);
+      };
+      req.onerror = () => resolve(undefined);
+    });
+  });
+  expect(bounds).toEqual({ width: 1920, height: 1080 });
+});
+
+test('world-size sheet — inner scene gets own bounds, parent unchanged', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  // Mobile-adjusted seed: viewport scaled so inner-node (world 100,300,200,120)
+  // is visible on a 390-wide screen.
+  // With scale=0.5, x=50, y=200: inner-node center at world(200,360)
+  // → screen(200*0.5+50, 360*0.5+200) = (150, 380) — well within 390x800.
+  const mobileSeed = {
+    ...SEED_STATE,
+    viewport: { x: 50, y: 200, scale: 0.5 },
+    savedAt: Date.now(),
+  };
+  await page.addInitScript((state) => {
+    localStorage.setItem('endless-paper-autosave', JSON.stringify(state));
+    localStorage.setItem('ep_welcomed_v1', '1');
+  }, mobileSeed);
+
+  await page.goto('/');
+  await waitForCanvas(page);
+
+  // Enter inner-node via double-click (select tool)
+  await page.keyboard.press('v');
+  await page.waitForTimeout(100);
+  // inner-node center at screen (150, 380) with mobile viewport
+  await page.mouse.click(150, 380);
+  await page.waitForTimeout(80);
+  await page.mouse.click(150, 380);
+  await page.waitForSelector('button[title="Escape"]', { timeout: 5000 });
+
+  // Inside inner scene — open world-size sheet
+  await page.click('button[title="More"]');
+  await page.waitForTimeout(200);
+  await page.click('[data-testid="mobile-world-size-button"]');
+  await page.waitForSelector('[data-testid="world-size-sheet"]', { timeout: 3000 });
+
+  // Choose A4 portrait
+  await page.click('[data-testid="world-size-option-a4-portrait"]');
+  await page.waitForTimeout(100);
+
+  // Go back to parent
+  await page.click('button[title="Escape"]');
+  await page.waitForTimeout(800); // autosave
+
+  // Check IDB: root has no bounds, inner has A4 portrait
+  const result = await page.evaluate(async () => {
+    return new Promise<{ rootBounds: any; innerBounds: any }>((resolve) => {
+      const req = indexedDB.open('endless-paper', 1);
+      req.onsuccess = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains('state')) { resolve({ rootBounds: 'no-store', innerBounds: null }); return; }
+        const tx = db.transaction('state', 'readonly');
+        const gr = tx.objectStore('state').get('autosave');
+        gr.onsuccess = () => {
+          const state = gr.result as any;
+          const rootBounds = state?.rootScene?.bounds;
+          const innerNode = state?.rootScene?.nodes?.find((n: any) => n.id === 'inner-node');
+          const innerBounds = innerNode?.innerScene?.bounds;
+          resolve({ rootBounds, innerBounds });
+        };
+        gr.onerror = () => resolve({ rootBounds: 'error', innerBounds: null });
+      };
+      req.onerror = () => resolve({ rootBounds: 'error', innerBounds: null });
+    });
+  });
+  expect(result.rootBounds).toBeUndefined();
+  expect(result.innerBounds).toEqual({ width: 2480, height: 3508 });
+});
+
+test('world-size sheet — setting ∞ clears bounds on current scene', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  // Pre-seed with 16:9 bounds already set on root scene
+  const stateWith16x9 = {
+    ...SEED_STATE,
+    rootScene: { ...SEED_STATE.rootScene, bounds: { width: 1920, height: 1080 } },
+    savedAt: Date.now(),
+  };
+  await page.addInitScript((state) => {
+    localStorage.setItem('endless-paper-autosave', JSON.stringify(state));
+    localStorage.setItem('ep_welcomed_v1', '1');
+  }, stateWith16x9);
+
+  await page.goto('/');
+  await waitForCanvas(page);
+
+  // Open ⋮ and world-size sheet
+  await page.click('button[title="More"]');
+  await page.waitForTimeout(200);
+  await page.click('[data-testid="mobile-world-size-button"]');
+  await page.waitForSelector('[data-testid="world-size-sheet"]', { timeout: 3000 });
+
+  // Verify 16:9 is currently active (has checkmark or accent styling)
+  const option16x9 = page.locator('[data-testid="world-size-option-16-9"]');
+  await expect(option16x9).toContainText('✓');
+
+  // Choose ∞
+  await page.click('[data-testid="world-size-option-none"]');
+  await page.waitForTimeout(800); // autosave
+
+  // Bounds should now be undefined in IDB
+  const bounds = await page.evaluate(async () => {
+    return new Promise<any>((resolve) => {
+      const req = indexedDB.open('endless-paper', 1);
+      req.onsuccess = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains('state')) { resolve('no-store'); return; }
+        const tx = db.transaction('state', 'readonly');
+        const gr = tx.objectStore('state').get('autosave');
+        gr.onsuccess = () => resolve((gr.result as any)?.rootScene?.bounds);
+        gr.onerror = () => resolve('error');
+      };
+      req.onerror = () => resolve('error');
+    });
+  });
+  expect(bounds).toBeUndefined();
+});
+
 test('layer lock / visibility — locked-layer node cannot be selected', async ({ page }) => {
   await seedLocalStorage(page);
   await page.goto('/');
