@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { Scene, ToolType, Viewport, SceneLevel, PersistedState, Asset, Layer, SceneAudio, StartCamera, SymmetryMode, ImageLOD } from './types/scene';
+import { Scene, ToolType, Viewport, SceneLevel, PersistedState, Asset, Layer, SceneAudio, StartCamera, SymmetryMode, ImageLOD, BrushType } from './types/scene';
 import { createScene, createNode, addNode, ensureLayers, createLayer, buildSceneCatalog, generateId, getBoundingBox } from './engine/scene-graph';
 import { Canvas, CanvasHandle } from './components/Canvas';
 import { Toolbar } from './components/Toolbar';
@@ -59,6 +59,7 @@ export default function App({ initialState, settings }: AppProps) {
   const initAssets = initialState?.assets ?? [];
 
   const [tool, setTool] = useState<ToolType>('pen');
+  const [brushType, setBrushType] = useState<BrushType>('pen');
   const [strokeColor, setStrokeColor] = useState('#1a1a2e');
   const [fillColor, setFillColor] = useState('none');
   const [strokeWidth, setStrokeWidth] = useState(2);
@@ -1150,6 +1151,7 @@ export default function App({ initialState, settings }: AppProps) {
         strokeColor={strokeColor}
         fillColor={fillColor}
         strokeWidth={strokeWidth}
+        brushType={brushType}
         selectedNodeIds={selectedNodeIds}
         setSelectedNodeIds={setSelectedNodeIds}
         sceneStack={sceneStack}
@@ -1249,6 +1251,25 @@ export default function App({ initialState, settings }: AppProps) {
             <div className="rounded-full bg-white/60 flex-shrink-0" style={{ width: `${Math.max(3, Math.min(16, strokeWidth * 2))}px`, height: `${Math.max(3, Math.min(16, strokeWidth * 2))}px` }} />
             <span className="text-[8px] text-gray-500 font-mono leading-none">{strokeWidth}</span>
           </button>
+          {/* Brush type selector — visible only when pen is active */}
+          {tool === 'pen' && (
+            <>
+              <div className="w-px h-8 bg-white/15 flex-shrink-0 mx-0.5" />
+              {([
+                { id: 'pen'    as BrushType, label: '✒', title: 'Stylo' },
+                { id: 'pencil' as BrushType, label: '✏', title: 'Crayon' },
+                { id: 'marker' as BrushType, label: '🖊', title: 'Feutre' },
+                { id: 'brush'  as BrushType, label: '🖌', title: 'Pinceau' },
+              ]).map(({ id, label, title }) => (
+                <button
+                  key={id}
+                  title={title}
+                  className={`w-10 h-11 flex-shrink-0 flex items-center justify-center rounded-xl touch-manipulation text-base transition-colors ${brushType === id ? 'bg-accent text-white' : 'text-gray-400 active:bg-white/10 active:text-white'}`}
+                  onClick={() => setBrushType(id)}
+                >{label}</button>
+              ))}
+            </>
+          )}
           <div className="w-px h-8 bg-white/15 flex-shrink-0 mx-0.5" />
           {/* Essential tools */}
           {([

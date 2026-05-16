@@ -6,6 +6,8 @@ export interface Viewport {
   scale: number; // zoom level (1 = 100%)
 }
 
+export type BrushType = 'pen' | 'pencil' | 'marker' | 'brush';
+
 export interface VectorPath {
   id: string;
   d: string;           // SVG path data
@@ -14,6 +16,7 @@ export interface VectorPath {
   fill: string;
   opacity: number;
   pressureSensitive?: boolean;
+  brushType?: BrushType;
 }
 
 export type SymmetryMode = 'off' | 'vertical' | 'horizontal' | 'both' | 'radial4' | 'radial6' | 'radial8';

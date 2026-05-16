@@ -99,6 +99,7 @@ interface CanvasProps {
   strokeColor: string;
   fillColor: string;
   strokeWidth: number;
+  brushType?: import('../types/scene').BrushType;
   selectedNodeIds: Set<string>;
   setSelectedNodeIds: (ids: Set<string>) => void;
   sceneStack: SceneLevel[];
@@ -133,7 +134,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   scene, setScene,
   viewport, setViewport,
   tool, setTool,
-  strokeColor, fillColor, strokeWidth,
+  strokeColor, fillColor, strokeWidth, brushType = 'pen',
   selectedNodeIds, setSelectedNodeIds,
   sceneStack, setSceneStack,
   onSceneChange,
@@ -188,6 +189,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   const toolRef = useRef(tool);
   const strokeColorRef = useRef(strokeColor);
   const strokeWidthRef = useRef(strokeWidth);
+  const brushTypeRef = useRef(brushType);
   const fillColorRef = useRef(fillColor);
   const selectedNodeIdsRef = useRef(selectedNodeIds);
   const sceneStackRef = useRef(sceneStack);
@@ -280,6 +282,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   useEffect(() => { toolRef.current = tool; }, [tool]);
   useEffect(() => { strokeColorRef.current = strokeColor; }, [strokeColor]);
   useEffect(() => { strokeWidthRef.current = strokeWidth; }, [strokeWidth]);
+  useEffect(() => { brushTypeRef.current = brushType; }, [brushType]);
   useEffect(() => { fillColorRef.current = fillColor; }, [fillColor]);
   useEffect(() => { selectedNodeIdsRef.current = selectedNodeIds; needsRenderRef.current = true; }, [selectedNodeIds]);
   useEffect(() => { sceneStackRef.current = sceneStack; }, [sceneStack]);
@@ -510,6 +513,12 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
     }, [markDirty]),
 
     onStrokeEnd: useCallback((path: VectorPath, minX: number, minY: number, maxX: number, maxY: number) => {
+      const bt = brushTypeRef.current;
+      const opacityMap = { pen: 1, pencil: 0.6, marker: 0.9, brush: 0.8 } as const;
+      const widthMap = { pen: 1, pencil: 0.85, marker: 2, brush: 1.4 } as const;
+      path.brushType = bt;
+      path.opacity = opacityMap[bt] ?? 1;
+      path.strokeWidth = path.strokeWidth * (widthMap[bt] ?? 1);
       const margin = strokeWidthRef.current;
       const symm = symmetryRef.current;
       const cx = symmCenterRef.current.x;
@@ -1222,12 +1231,12 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
             // Draw live stroke (and mirrored previews)
             const pts = getLivePoints();
             if (pts.length > 1) {
-              renderLiveStroke(ctx, pts, strokeColorRef.current, strokeWidthRef.current, viewportRef.current, pressureEnabledRef.current);
+              renderLiveStroke(ctx, pts, strokeColorRef.current, strokeWidthRef.current, viewportRef.current, pressureEnabledRef.current, brushTypeRef.current);
               if (symmMode !== 'off') {
                 const mirPtSets = mirroredPoints(pts, symmMode, symmCx, symmCy);
                 for (const mPts of mirPtSets) {
                   if (mPts.length > 1) {
-                    renderLiveStroke(ctx, mPts, strokeColorRef.current, strokeWidthRef.current, viewportRef.current, pressureEnabledRef.current);
+                    renderLiveStroke(ctx, mPts, strokeColorRef.current, strokeWidthRef.current, viewportRef.current, pressureEnabledRef.current, brushTypeRef.current);
                   }
                 }
               }

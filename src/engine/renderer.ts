@@ -1,4 +1,4 @@
-import { Scene, SceneNode, Viewport, VectorPath, Layer } from '../types/scene';
+import { Scene, SceneNode, Viewport, VectorPath, Layer, BrushType } from '../types/scene';
 import { LRUImageCache } from './image-cache';
 import { samplePath, pointAtLength, totalPathLength } from './svg-path';
 
@@ -654,6 +654,22 @@ function drawEnterHint(ctx: CanvasRenderingContext2D, node: SceneNode): void {
   ctx.restore();
 }
 
+function applyBrushStyle(ctx: CanvasRenderingContext2D, brushType: BrushType | undefined): void {
+  switch (brushType) {
+    case 'marker':
+      ctx.lineCap = 'square';
+      ctx.lineJoin = 'bevel';
+      break;
+    case 'pencil':
+    case 'brush':
+    case 'pen':
+    default:
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      break;
+  }
+}
+
 function drawVectorPath(ctx: CanvasRenderingContext2D, vp: VectorPath): void {
   const path2d = getPath2D(vp.d);
   ctx.globalAlpha = (ctx.globalAlpha) * vp.opacity;
@@ -666,8 +682,7 @@ function drawVectorPath(ctx: CanvasRenderingContext2D, vp: VectorPath): void {
   if (vp.stroke && vp.stroke !== 'none') {
     ctx.strokeStyle = vp.stroke;
     ctx.lineWidth = vp.strokeWidth;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
+    applyBrushStyle(ctx, vp.brushType);
     ctx.stroke(path2d);
   }
 }
@@ -930,16 +945,20 @@ export function renderLiveStroke(
   stroke: string,
   strokeWidth: number,
   viewport: Viewport,
-  pressureSensitive = false
+  pressureSensitive = false,
+  brushType: BrushType = 'pen'
 ): void {
   if (points.length < 2) return;
+
+  const opacityMap: Record<BrushType, number> = { pen: 1, pencil: 0.6, marker: 0.9, brush: 0.8 };
+  const widthMap: Record<BrushType, number> = { pen: 1, pencil: 0.85, marker: 2, brush: 1.4 };
 
   ctx.save();
   ctx.setTransform(viewport.scale, 0, 0, viewport.scale, viewport.x, viewport.y);
   ctx.strokeStyle = stroke;
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-  ctx.globalAlpha = 0.85;
+  applyBrushStyle(ctx, brushType);
+  ctx.globalAlpha = opacityMap[brushType];
+  strokeWidth = strokeWidth * widthMap[brushType];
 
   if (pressureSensitive) {
     for (let i = 1; i < points.length; i++) {
