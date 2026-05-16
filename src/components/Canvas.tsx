@@ -1189,11 +1189,15 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
 
           if (!renderedCrossfade) {
             const rootStartCam = sceneStackRef.current[0]?.scene?.startCamera;
-            const startCameraPin = rootStartCam ? (() => {
-              const vp = rootStartCam.viewport;
+            // During drag, use the ref's live viewport (updated synchronously in onDragMove)
+            // instead of the stale React state so the pin moves in real-time.
+            const pinVp = pinDragRef.current?.isDragging
+              ? pinDragRef.current.currentStartVp
+              : rootStartCam?.viewport;
+            const startCameraPin = (rootStartCam && pinVp) ? (() => {
               const w = canvas.width;
               const h = canvas.height;
-              return { x: (w / 2 - vp.x) / vp.scale, y: (h / 2 - vp.y) / vp.scale };
+              return { x: (w / 2 - pinVp.x) / pinVp.scale, y: (h / 2 - pinVp.y) / pinVp.scale };
             })() : null;
 
             renderScene(ctx, sceneRef.current, viewportRef.current, {
