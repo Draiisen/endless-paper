@@ -187,6 +187,19 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   // Auto-exit zoom debounce
   const lastAutoExitTimeRef = useRef(0);
 
+  // Crossfade state — drives the seamless zoom-through experience
+  // progress: 0 = fully outer (world-1), 1 = fully inner (world-2)
+  const crossfadeRef = useRef<{
+    innerScene: Scene;
+    outerScene: Scene;
+    lt: { s: number; ox: number; oy: number };
+    entering: boolean;   // true = zooming in, false = zooming out
+    progress: number;
+    fixedVp?: Viewport;  // set when the scene switch fires, bridges the React update gap
+  } | null>(null);
+  const offscreenC1 = useRef<HTMLCanvasElement | null>(null);
+  const offscreenC2 = useRef<HTMLCanvasElement | null>(null);
+
   useEffect(() => { sceneRef.current = scene; needsRenderRef.current = true; }, [scene]);
   useEffect(() => {
     viewportRef.current = viewport;
@@ -845,69 +858,136 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
       const hasAnimatedNodes = sceneRef.current.nodes.some(n => n.animation);
       const now = Date.now();
       const hasVectorFading = sceneRef.current.nodes.some(n => n.lod?.vectorLoadedAt && (now - n.lod.vectorLoadedAt) < 650);
-      if (needsRenderRef.current || liveStrokeActive || liveShapeActive || (ms && me) || hasAnimatedNodes || hasVectorFading) {
+      const cf = crossfadeRef.current;
+      if (needsRenderRef.current || liveStrokeActive || liveShapeActive || (ms && me) || hasAnimatedNodes || hasVectorFading || !!cf) {
         const ctx = canvas.getContext('2d');
         if (ctx) {
           const symmMode = symmetryRef.current;
           const symmCx = symmCenterRef.current.x;
           const symmCy = symmCenterRef.current.y;
 
-          const rootStartCam = sceneStackRef.current[0]?.scene?.startCamera;
-          const startCameraPin = rootStartCam ? (() => {
-            const vp = rootStartCam.viewport;
-            const w = canvas.width;
-            const h = canvas.height;
-            return { x: (w / 2 - vp.x) / vp.scale, y: (h / 2 - vp.y) / vp.scale };
-          })() : null;
+          // ── Crossfade rendering ──────────────────────────────────────────────
+          let renderedCrossfade = false;
+          if (cf) {
+            const currentIsInner = sceneRef.current.id === cf.innerScene.id;
+            const currentIsOuter = sceneRef.current.id === cf.outerScene.id;
 
-          renderScene(ctx, sceneRef.current, viewportRef.current, {
-            highlightSelected: selectedNodeIdsRef.current,
-            showGrid: true,
-            selectionRect: (ms && me)
-              ? { x: Math.min(ms.x, me.x), y: Math.min(ms.y, me.y), width: Math.abs(me.x - ms.x), height: Math.abs(me.y - ms.y) }
-              : null,
-            enterHintNodeId: enterHintNodeIdRef.current,
-            viewerMode: viewerModeRef.current,
-            showReference: showReferenceRef.current,
-            symmetryCenter: symmMode !== 'off' ? { x: symmCx, y: symmCy } : null,
-            pathEditNodeId: pathEditNodeIdRef.current,
-            pathEditAnchors: pathAnchorsRef.current.length > 0 ? pathAnchorsRef.current : undefined,
-            pathEditSelectedAnchorIdx: selectedAnchorIdxRef.current,
-            animationTime: Date.now(),
-            startCameraPin,
-          });
-
-          // Draw live stroke (and mirrored previews)
-          const pts = getLivePoints();
-          if (pts.length > 1) {
-            renderLiveStroke(ctx, pts, strokeColorRef.current, strokeWidthRef.current, viewportRef.current, pressureEnabledRef.current);
-            // Mirrored live strokes
-            if (symmMode !== 'off') {
-              const mirPtSets = mirroredPoints(pts, symmMode, symmCx, symmCy);
-              for (const mPts of mirPtSets) {
-                if (mPts.length > 1) {
-                  renderLiveStroke(ctx, mPts, strokeColorRef.current, strokeWidthRef.current, viewportRef.current, pressureEnabledRef.current);
+            if (cf.fixedVp) {
+              // Scene switch just fired — bridge the one-frame React-update gap.
+              // Render the destination scene at the pre-computed viewport.
+              if (cf.entering) {
+                if (currentIsInner) {
+                  crossfadeRef.current = null; // React caught up, done
+                } else {
+                  renderScene(ctx, cf.innerScene, cf.fixedVp, { showGrid: false, viewerMode: viewerModeRef.current });
+                  renderedCrossfade = true;
                 }
+              } else {
+                if (currentIsOuter) {
+                  crossfadeRef.current = null;
+                } else {
+                  renderScene(ctx, cf.outerScene, cf.fixedVp, { showGrid: false, viewerMode: viewerModeRef.current });
+                  renderedCrossfade = true;
+                }
+              }
+            } else {
+              // Active crossfade — blend two scenes
+              const mainVp = viewportRef.current;
+              let vp1: Viewport, vp2: Viewport;
+
+              if (currentIsOuter || (cf.entering && !currentIsInner)) {
+                // World-1 is current (or React hasn't switched yet during enter)
+                vp1 = mainVp;
+                vp2 = { scale: cf.lt.s * vp1.scale, x: cf.lt.ox * vp1.scale + vp1.x, y: cf.lt.oy * vp1.scale + vp1.y };
+              } else {
+                // World-2 is current (during exit)
+                vp2 = mainVp;
+                const ps = vp2.scale / cf.lt.s;
+                vp1 = { scale: ps, x: vp2.x - cf.lt.ox * ps, y: vp2.y - cf.lt.oy * ps };
+              }
+
+              const w = canvas.width, h = canvas.height;
+              if (!offscreenC1.current || offscreenC1.current.width !== w || offscreenC1.current.height !== h) {
+                offscreenC1.current = Object.assign(document.createElement('canvas'), { width: w, height: h });
+              }
+              if (!offscreenC2.current || offscreenC2.current.width !== w || offscreenC2.current.height !== h) {
+                offscreenC2.current = Object.assign(document.createElement('canvas'), { width: w, height: h });
+              }
+              const ctx1 = offscreenC1.current.getContext('2d');
+              const ctx2 = offscreenC2.current.getContext('2d');
+              if (ctx1 && ctx2) {
+                renderScene(ctx1, cf.outerScene, vp1, { showGrid: false, viewerMode: viewerModeRef.current });
+                renderScene(ctx2, cf.innerScene, vp2, { showGrid: false, viewerMode: viewerModeRef.current });
+                ctx.save();
+                ctx.setTransform(1, 0, 0, 1, 0, 0);
+                ctx.clearRect(0, 0, w, h);
+                ctx.globalAlpha = Math.max(0, 1 - cf.progress);
+                ctx.drawImage(offscreenC1.current, 0, 0);
+                ctx.globalAlpha = Math.min(1, cf.progress);
+                ctx.drawImage(offscreenC2.current, 0, 0);
+                ctx.globalAlpha = 1;
+                ctx.restore();
+                renderedCrossfade = true;
               }
             }
           }
 
-          if (liveShapeActive && ss && se) {
-            renderLiveShape(ctx, ss.x, ss.y, se.x, se.y,
-              toolRef.current as 'rect' | 'circle',
-              strokeColorRef.current, fillColorRef.current, strokeWidthRef.current,
-              viewportRef.current);
-          }
+          if (!renderedCrossfade) {
+            const rootStartCam = sceneStackRef.current[0]?.scene?.startCamera;
+            const startCameraPin = rootStartCam ? (() => {
+              const vp = rootStartCam.viewport;
+              const w = canvas.width;
+              const h = canvas.height;
+              return { x: (w / 2 - vp.x) / vp.scale, y: (h / 2 - vp.y) / vp.scale };
+            })() : null;
 
-          // Portal flash overlay
-          if (isPortalingRef.current) {
-            ctx.save();
-            ctx.setTransform(1, 0, 0, 1, 0, 0);
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.restore();
-          }
+            renderScene(ctx, sceneRef.current, viewportRef.current, {
+              highlightSelected: selectedNodeIdsRef.current,
+              showGrid: true,
+              selectionRect: (ms && me)
+                ? { x: Math.min(ms.x, me.x), y: Math.min(ms.y, me.y), width: Math.abs(me.x - ms.x), height: Math.abs(me.y - ms.y) }
+                : null,
+              enterHintNodeId: enterHintNodeIdRef.current,
+              viewerMode: viewerModeRef.current,
+              showReference: showReferenceRef.current,
+              symmetryCenter: symmMode !== 'off' ? { x: symmCx, y: symmCy } : null,
+              pathEditNodeId: pathEditNodeIdRef.current,
+              pathEditAnchors: pathAnchorsRef.current.length > 0 ? pathAnchorsRef.current : undefined,
+              pathEditSelectedAnchorIdx: selectedAnchorIdxRef.current,
+              animationTime: Date.now(),
+              startCameraPin,
+            });
 
+            // Draw live stroke (and mirrored previews)
+            const pts = getLivePoints();
+            if (pts.length > 1) {
+              renderLiveStroke(ctx, pts, strokeColorRef.current, strokeWidthRef.current, viewportRef.current, pressureEnabledRef.current);
+              if (symmMode !== 'off') {
+                const mirPtSets = mirroredPoints(pts, symmMode, symmCx, symmCy);
+                for (const mPts of mirPtSets) {
+                  if (mPts.length > 1) {
+                    renderLiveStroke(ctx, mPts, strokeColorRef.current, strokeWidthRef.current, viewportRef.current, pressureEnabledRef.current);
+                  }
+                }
+              }
+            }
+
+            if (liveShapeActive && ss && se) {
+              renderLiveShape(ctx, ss.x, ss.y, se.x, se.y,
+                toolRef.current as 'rect' | 'circle',
+                strokeColorRef.current, fillColorRef.current, strokeWidthRef.current,
+                viewportRef.current);
+            }
+
+            // Portal flash overlay
+            if (isPortalingRef.current) {
+              ctx.save();
+              ctx.setTransform(1, 0, 0, 1, 0, 0);
+              ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+              ctx.fillRect(0, 0, canvas.width, canvas.height);
+              ctx.restore();
+            }
+          }
         }
         needsRenderRef.current = false;
       }
@@ -993,108 +1073,137 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   // Track previous viewport scale to detect "zooming in"
   const prevScaleRef = useRef(viewport.scale);
 
-  // Auto-enter on deep zoom
+  // Seamless zoom-through: crossfade driven by zoom level (no sudden switch)
+  // Ratio thresholds: node/inner-content occupying these fractions of screen → crossfade
+  const LENS_FADE_START = 0.55;  // crossfade starts (world-1 lens → world-2 content)
+  const LENS_FADE_FULL  = 1.75;  // crossfade completes → scene switch fires (invisible)
+
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) {
-      prevScaleRef.current = viewport.scale;
-      return;
-    }
+    if (!canvas) { prevScaleRef.current = viewport.scale; return; }
+    if (animatingRef.current) { prevScaleRef.current = viewport.scale; return; }
     if (!autoEnterEnabledRef.current) {
+      crossfadeRef.current = null;
       setEnterHintNodeId(null);
       setAutoEnterToast(null);
-      prevScaleRef.current = viewport.scale;
-      return;
-    }
-    if (animatingRef.current) {
       prevScaleRef.current = viewport.scale;
       return;
     }
 
     const w = canvas.width;
     const h = canvas.height;
-    let hintCandidate: SceneNode | null = null;
-    let autoCandidate: SceneNode | null = null;
+    const zoomingIn  = viewport.scale > prevScaleRef.current * 1.0001 || lastWheelDeltaY.current < 0;
+    const zoomingOut = viewport.scale < prevScaleRef.current * 0.9999 || lastWheelDeltaY.current > 0;
+    prevScaleRef.current = viewport.scale;
+    lastWheelDeltaY.current = 0;
 
-    for (const node of sceneRef.current.nodes) {
+    const stack = sceneStackRef.current;
+    const currentScene = sceneRef.current;
+
+    // ── ENTER: look for a lens node to fade into ───────────────────────────────
+    let enterNode: SceneNode | null = null;
+    let enterRatio = 0;
+    let hintNode: SceneNode | null = null;
+
+    for (const node of currentScene.nodes) {
+      if (!node.innerScene || node.innerScene.nodes.length === 0) continue;
       const sw = node.width * viewport.scale;
       const sh = node.height * viewport.scale;
       const ratio = Math.min(sw / w, sh / h);
-      if (ratio > 1.5) {
-        autoCandidate = node;
-        break;
-      } else if (ratio > 0.25) {
-        hintCandidate = node;
+      if (ratio > enterRatio) { enterRatio = ratio; enterNode = node; }
+      if (ratio > 0.2 && !enterNode) hintNode = node;
+    }
+    // hint for any node (including empty)
+    if (!hintNode && !enterNode) {
+      for (const node of currentScene.nodes) {
+        if (!node.innerScene) continue;
+        const ratio = Math.min(node.width * viewport.scale / w, node.height * viewport.scale / h);
+        if (ratio > 0.2) { hintNode = node; break; }
       }
     }
 
-    const zoomingIn = viewport.scale > prevScaleRef.current * 1.0001 || lastWheelDeltaY.current < 0;
-    const zoomingOut = viewport.scale < prevScaleRef.current * 0.9999 || lastWheelDeltaY.current > 0;
-    prevScaleRef.current = viewport.scale;
-    lastWheelDeltaY.current = 0; // consume — don't carry over to next viewport change (e.g. pan or teleport)
+    if (enterNode && enterRatio > LENS_FADE_START) {
+      const lt = computeLensTransform(enterNode, enterNode.innerScene!.nodes);
+      if (lt) {
+        const progress = Math.min(1, (enterRatio - LENS_FADE_START) / (LENS_FADE_FULL - LENS_FADE_START));
+        crossfadeRef.current = {
+          innerScene: enterNode.innerScene!,
+          outerScene: currentScene,
+          lt,
+          entering: true,
+          progress,
+        };
+        markDirty();
 
-    if (autoCandidate && zoomingIn) {
-      lastWheelDeltaY.current = 0;
-      // immediate=true: no pre-animation, content stays locked in place
-      performEnterScene(autoCandidate, true);
-      return;
-    }
-
-    // Auto-exit: if zoomed out enough that the inner scene is < 30% of viewport area
-    const stack = sceneStackRef.current;
-    if (zoomingOut && stack.length > 1) {
-      const now = Date.now();
-      if (now - lastAutoExitTimeRef.current > 800) {
-        const nodes = sceneRef.current.nodes;
-        if (nodes.length > 0) {
-          const bb = getBoundingBox(nodes);
-          const screenW = bb.width * viewport.scale;
-          const screenH = bb.height * viewport.scale;
-          const sceneScreenArea = screenW * screenH;
-          const viewportArea = w * h;
-          if (sceneScreenArea > 0 && sceneScreenArea < viewportArea * 0.30) {
-            lastAutoExitTimeRef.current = now;
-            const currentLevel = stack[stack.length - 1];
-            const parentEntry = stack[stack.length - 2];
-            const newStack = stack.slice(0, -1);
-
-            // Seamless exit: invert the lens transform so world-1 content appears at
-            // the exact same screen position as it would through the lens right now.
-            let parentVp: Viewport;
-            const lt = currentLevel.lensTransform;
-            if (lt) {
-              const vp2 = viewportRef.current;
-              const parentScale = vp2.scale / lt.s;
-              parentVp = {
-                scale: parentScale,
-                x: vp2.x - lt.ox * parentScale,
-                y: vp2.y - lt.oy * parentScale,
-              };
-            } else {
-              parentVp = parentEntry.viewportWhenLeft;
-            }
-
-            setScene(parentEntry.scene);
-            setViewport(parentVp);
-            viewportRef.current = parentVp;
-            prevScaleRef.current = parentVp.scale;
-            setSceneStack(newStack);
-            setSelectedNodeIds(new Set());
-            setEnterHintNodeId(null);
-            setAutoEnterToast(null);
-            markDirty();
-            return;
-          }
+        if (progress >= 1 && zoomingIn) {
+          // Capture the exact inner viewport NOW (before performEnterScene mutates viewportRef)
+          const vp1 = viewportRef.current;
+          const fixedVp: Viewport = {
+            scale: lt.s * vp1.scale,
+            x: lt.ox * vp1.scale + vp1.x,
+            y: lt.oy * vp1.scale + vp1.y,
+          };
+          crossfadeRef.current = { ...crossfadeRef.current, progress: 1, fixedVp };
+          performEnterScene(enterNode, true);
         }
+        return;
       }
     }
 
-    if (hintCandidate) {
-      setEnterHintNodeId(hintCandidate.id);
-      setAutoEnterToast(`Press Z to enter ${nodeLabel(hintCandidate)}`);
-    } else {
-      setEnterHintNodeId(null);
-      setAutoEnterToast(null);
+    // No entering node — clear entering crossfade
+    if (crossfadeRef.current?.entering) {
+      crossfadeRef.current = null;
+      markDirty();
+    }
+
+    // ── EXIT: in world-2, fade back to world-1 as user zooms out ──────────────
+    if (stack.length > 1 && !animatingRef.current) {
+      const currentLevel = stack[stack.length - 1];
+      const parentEntry = stack[stack.length - 2];
+      const lt = currentLevel.lensTransform;
+      if (lt && zoomingOut && currentScene.nodes.length > 0) {
+        const bb = getBoundingBox(currentScene.nodes);
+        const innerRatio = Math.min(bb.width * viewport.scale / w, bb.height * viewport.scale / h);
+        const progress = Math.min(1, Math.max(0, (innerRatio - LENS_FADE_START) / (LENS_FADE_FULL - LENS_FADE_START)));
+        // Show crossfade immediately — cooldown only gates the actual scene switch
+        crossfadeRef.current = { innerScene: currentScene, outerScene: parentEntry.scene, lt, entering: false, progress };
+        markDirty();
+        const now = Date.now();
+        if (progress <= 0 && now - lastAutoExitTimeRef.current > 800) {
+          lastAutoExitTimeRef.current = now;
+          const vp2 = viewportRef.current;
+          const parentScale = vp2.scale / lt.s;
+          const parentVp: Viewport = { scale: parentScale, x: vp2.x - lt.ox * parentScale, y: vp2.y - lt.oy * parentScale };
+          crossfadeRef.current = { ...crossfadeRef.current, progress: 0, fixedVp: parentVp };
+          setScene(parentEntry.scene);
+          setViewport(parentVp);
+          viewportRef.current = parentVp;
+          prevScaleRef.current = parentVp.scale;
+          setSceneStack(stack.slice(0, -1));
+          setSelectedNodeIds(new Set());
+          setEnterHintNodeId(null);
+          setAutoEnterToast(null);
+          markDirty();
+        }
+        return;
+      }
+    }
+
+    // Clear exit crossfade when not in exit conditions
+    if (crossfadeRef.current && !crossfadeRef.current.entering) {
+      crossfadeRef.current = null;
+      markDirty();
+    }
+
+    // Hint toast (only when no crossfade)
+    if (!crossfadeRef.current) {
+      if (hintNode) {
+        setEnterHintNodeId(hintNode.id);
+        setAutoEnterToast(`Press Z to enter`);
+      } else {
+        setEnterHintNodeId(null);
+        setAutoEnterToast(null);
+      }
     }
   }, [viewport, performEnterScene, setScene, setViewport, setSceneStack, setSelectedNodeIds, markDirty]);
 
