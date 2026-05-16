@@ -1,7 +1,7 @@
 import { Scene } from '../types/scene';
 import { createScene, createNode, addNode } from './scene-graph';
 
-export type TemplateName = 'mindmap' | 'storyboard';
+export type TemplateName = 'mindmap' | 'storyboard' | 'presentation';
 
 export function createTemplate(name: TemplateName, cx: number, cy: number): Scene {
   if (name === 'mindmap') {
@@ -48,6 +48,31 @@ export function createTemplate(name: TemplateName, cx: number, cy: number): Scen
         s = addNode(s, lbl);
       }
     }
+    return s;
+  }
+  if (name === 'presentation') {
+    let s = createScene();
+    const W = 560, H = 315, GAP = 48;
+    const slides = [
+      { title: 'Titre', body: 'Sous-titre ou accroche ici', accent: '#6c63ff' },
+      { title: 'Contenu', body: '• Point 1\n• Point 2\n• Point 3', accent: '#22c55e' },
+      { title: 'Conclusion', body: 'Votre message final ici', accent: '#f59e0b' },
+    ];
+    slides.forEach((slide, i) => {
+      const px = cx - ((slides.length - 1) * (W + GAP)) / 2 + i * (W + GAP);
+      const frame = createNode('rect', px - W / 2, cy - H / 2, W, H);
+      frame.stroke = slide.accent; frame.fill = `${slide.accent}08`; frame.strokeWidth = 2;
+      s = addNode(s, frame);
+      const num = createNode('text', px - W / 2 + 16, cy - H / 2 + 14, 40, 16);
+      num.text = `${i + 1}/${slides.length}`; num.fontSize = 11; num.color = `${slide.accent}80`; num.fontFamily = 'system-ui, sans-serif';
+      s = addNode(s, num);
+      const title = createNode('text', px - W / 2 + 32, cy - H / 2 + H * 0.28, W - 64, 36);
+      title.text = slide.title; title.fontSize = 26; title.fontWeight = 'bold'; title.color = '#f8fafc'; title.fontFamily = 'system-ui, sans-serif';
+      s = addNode(s, title);
+      const body = createNode('text', px - W / 2 + 32, cy - H / 2 + H * 0.55, W - 64, 80);
+      body.text = slide.body; body.fontSize = 14; body.color = '#94a3b8'; body.fontFamily = 'system-ui, sans-serif';
+      s = addNode(s, body);
+    });
     return s;
   }
   return createScene();

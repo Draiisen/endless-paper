@@ -88,11 +88,16 @@ export default function App({ initialState, settings }: AppProps) {
   const [showWelcome, setShowWelcome] = useState(() => !localStorage.getItem('ep_welcomed_v1'));
   const [showHelp, setShowHelp] = useState(false);
   const [errorToast, setErrorToast] = useState<string | null>(null);
+  const [showImageHint, setShowImageHint] = useState(false);
+  const [showBookmarks, setShowBookmarks] = useState(false);
+  const [showFirstRunHint, setShowFirstRunHint] = useState(false);
 
   const { popup, handleNodeClick, dismiss: dismissPopup } = useHotspotHandler(viewerMode);
 
   const savedFlashTimerRef = useRef<number | null>(null);
   const autoSaveTimerRef = useRef<number | null>(null);
+  const imageHintTimerRef = useRef<number | null>(null);
+  const firstRunHintTimerRef = useRef<number | null>(null);
   const tourStopRef = useRef<(() => void) | null>(null);
   const tourPlayingRef = useRef(false);
   const canvasHandleRef = useRef<CanvasHandle | null>(null);
@@ -113,6 +118,14 @@ export default function App({ initialState, settings }: AppProps) {
   useEffect(() => { sceneStackRef.current = sceneStack; }, [sceneStack]);
   useEffect(() => { viewportRef.current = viewport; }, [viewport]);
   useEffect(() => { assetsRef.current = assets; }, [assets]);
+
+  // Close bookmarks popover on outside click
+  useEffect(() => {
+    if (!showBookmarks) return;
+    const handler = () => setShowBookmarks(false);
+    window.addEventListener('pointerdown', handler);
+    return () => window.removeEventListener('pointerdown', handler);
+  }, [showBookmarks]);
 
   // Sync active layer when scene changes
   useEffect(() => {
@@ -705,6 +718,9 @@ export default function App({ initialState, settings }: AppProps) {
         const newScene = addNode(sceneRef.current, node);
         setScene(newScene);
         handleSceneChange(newScene, viewport);
+        if (imageHintTimerRef.current) window.clearTimeout(imageHintTimerRef.current);
+        setShowImageHint(true);
+        imageHintTimerRef.current = window.setTimeout(() => { setShowImageHint(false); imageHintTimerRef.current = null; }, 4500);
 
         // Color-vector LOD: runs in a Web Worker, updates scene when done.
         try {
@@ -799,6 +815,42 @@ export default function App({ initialState, settings }: AppProps) {
     handleSceneChange(newScene, viewportRef.current);
   }, [setScene, handleSceneChange]);
 
+  const handleFitAll = useCallback(() => {
+    const nodes = sceneRef.current.nodes;
+    if (nodes.length === 0) {
+      const vp = makeInitialViewport();
+      setViewport(vp);
+      viewportRef.current = vp;
+      return;
+    }
+    const xs = nodes.flatMap(n => [n.x, n.x + n.width]);
+    const ys = nodes.flatMap(n => [n.y, n.y + n.height]);
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    const minY = Math.min(...ys), maxY = Math.max(...ys);
+    const tbW = toolbarCollapsed ? 36 : 56;
+    const cw = Math.max(100, window.innerWidth - tbW);
+    const ch = Math.max(100, window.innerHeight - 48);
+    const contentW = Math.max(1, maxX - minX);
+    const contentH = Math.max(1, maxY - minY);
+    const scale = Math.min(cw / contentW * 0.88, ch / contentH * 0.88, 4);
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    const vp: Viewport = { scale, x: tbW + cw / 2 - cx * scale, y: 48 + ch / 2 - cy * scale };
+    setViewport(vp);
+    viewportRef.current = vp;
+  }, [toolbarCollapsed]);
+
+  // Auto-dismiss first-run hint when user draws something
+  useEffect(() => {
+    if (scene.nodes.length > 0 && showFirstRunHint) {
+      setShowFirstRunHint(false);
+      if (firstRunHintTimerRef.current) {
+        window.clearTimeout(firstRunHintTimerRef.current);
+        firstRunHintTimerRef.current = null;
+      }
+    }
+  }, [scene.nodes.length, showFirstRunHint]);
+
   // Keyboard shortcuts
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -868,12 +920,13 @@ export default function App({ initialState, settings }: AppProps) {
           case 'v': setTool('select'); break;
           case 'z': canvasHandleRef.current?.enterSelected(); break;
           case 'm': setShowMiniMap(v => !v); break;
+          case 'f': handleFitAll(); break;
         }
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [handleUndo, handleRedo, navigateTo, selectedNodeIds, viewport, setScene, handleSceneChange, handleManualSave, handleDeleteSelected, handleDuplicate]);
+  }, [handleUndo, handleRedo, navigateTo, selectedNodeIds, viewport, setScene, handleSceneChange, handleManualSave, handleDeleteSelected, handleDuplicate, handleFitAll]);
 
   const selectedNodes = scene.nodes.filter(n => selectedNodeIds.has(n.id));
   const singleSelection = selectedNodes.length === 1 ? selectedNodes[0] : null;
@@ -884,6 +937,8 @@ export default function App({ initialState, settings }: AppProps) {
   const sceneLayers = ensureLayers(scene);
   const sceneCatalog = buildSceneCatalog(rootSceneRef.current);
   const zoomPercent = Math.round(viewport.scale * 100);
+  const vpCenterX = Math.round((-viewport.x + window.innerWidth / 2) / viewport.scale);
+  const vpCenterY = Math.round((-viewport.y + window.innerHeight / 2) / viewport.scale);
 
   // Selection bar computed values
   const selHasShapes = selectedNodes.some(n => n.type === 'rect' || n.type === 'circle' || n.type === 'path');
@@ -1067,7 +1122,9 @@ export default function App({ initialState, settings }: AppProps) {
               <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current"><path d="M18.4 10.6C16.55 8.99 14.15 8 11.5 8c-4.65 0-8.58 3.03-9.96 7.22L3.9 16c1.05-3.19 4.05-5.5 7.6-5.5 1.95 0 3.73.72 5.12 1.88L13 16h9V7l-3.6 3.6z"/></svg>
             </button>
 
-            {/* Zoom — desktop only */}
+            {/* Zoom + position — desktop only */}
+            <button onClick={handleFitAll} title="Tout afficher (F)" className="p-1 rounded text-gray-500 hover:text-white hover:bg-white/10 transition-colors flex-shrink-0 hidden sm:block text-sm leading-none">⊡</button>
+            <span className="text-[10px] font-mono text-gray-600 flex-shrink-0 hidden lg:block select-none" title={`Position du centre — X:${vpCenterX} Y:${vpCenterY}`}>{vpCenterX},{vpCenterY}</span>
             <span className="text-xs font-mono text-accent min-w-[44px] text-right flex-shrink-0 hidden sm:block">{zoomPercent}%</span>
 
             {/* Desktop file buttons — hidden on mobile */}
@@ -1076,8 +1133,28 @@ export default function App({ initialState, settings }: AppProps) {
                 <button onClick={() => setShowProperties(v => !v)} title="Properties" className={`p-1.5 rounded text-xs transition-colors ${showProperties ? 'bg-accent text-white' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}>⚙</button>
               )}
               <button onClick={() => setAudioMuted(m => !m)} className="p-1.5 rounded text-gray-400 hover:text-white hover:bg-white/10 transition-colors">{audioMuted ? '🔇' : '🔊'}</button>
-              <button onClick={handleSetStartCamera} className="px-2 py-1 rounded text-xs text-gray-400 hover:text-white hover:bg-white/10 transition-colors">🎯</button>
-              {getRootScene().startCamera && <button onClick={handleResetToStart} className="px-2 py-1 rounded text-xs text-gray-400 hover:text-white hover:bg-white/10 transition-colors">⟳</button>}
+              <button onClick={handleSetStartCamera} title="Définir la vue de départ" className="px-2 py-1 rounded text-xs text-gray-400 hover:text-white hover:bg-white/10 transition-colors">🎯</button>
+              {getRootScene().startCamera && <button onClick={handleResetToStart} title="Revenir à la vue de départ" className="px-2 py-1 rounded text-xs text-gray-400 hover:text-white hover:bg-white/10 transition-colors">⟳</button>}
+              {(scene.cameras?.length ?? 0) > 0 && (
+                <div className="relative">
+                  <button
+                    onClick={() => setShowBookmarks(v => !v)}
+                    title="Vues sauvegardées"
+                    className={`px-2 py-1 rounded text-xs transition-colors ${showBookmarks ? 'text-white bg-white/10' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}
+                  >📍 {scene.cameras!.length}</button>
+                  {showBookmarks && (
+                    <div className="absolute right-0 top-full mt-1 bg-ink border border-white/10 rounded-xl shadow-2xl py-1 min-w-[160px] z-50" onClick={e => e.stopPropagation()}>
+                      {scene.cameras!.map(cam => (
+                        <button
+                          key={cam.id}
+                          onClick={() => { setViewport(cam.viewport); viewportRef.current = cam.viewport; setShowBookmarks(false); }}
+                          className="w-full text-left px-3 py-2 text-xs text-gray-300 hover:text-white hover:bg-white/10 transition-colors"
+                        >{cam.name}</button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               <div className="w-px h-4 bg-white/20 mx-1" />
               <button onClick={handleNew} className="px-2 py-1 rounded text-xs text-gray-300 hover:text-white hover:bg-white/10 transition-colors">New</button>
               <button onClick={handleManualSave} className="px-2 py-1 rounded text-xs text-gray-300 hover:text-white hover:bg-white/10 transition-colors">Save</button>
@@ -1319,9 +1396,10 @@ export default function App({ initialState, settings }: AppProps) {
             <p className="text-gray-400 text-sm font-medium">Choisissez un point de départ</p>
             <div className="flex gap-3 pointer-events-auto">
               {([
-                { key: 'blank', icon: '⬜', label: 'Vierge', desc: 'Canvas vide', color: '#64748b' },
+                { key: 'blank', icon: '⬜', label: 'Vierge', desc: 'Canvas libre', color: '#64748b' },
                 { key: 'mindmap', icon: '🧠', label: 'Carte mentale', desc: 'Centre + branches', color: '#6c63ff' },
                 { key: 'storyboard', icon: '🎬', label: 'Storyboard', desc: '4 panneaux', color: '#22c55e' },
+                { key: 'presentation', icon: '📊', label: 'Présentation', desc: '3 diapositives', color: '#f59e0b' },
               ] as const).map(t => (
                 <button
                   key={t.key}
@@ -1346,6 +1424,32 @@ export default function App({ initialState, settings }: AppProps) {
         </div>
       )}
 
+      {/* Image import hint toast */}
+      {showImageHint && (
+        <div className="fixed left-1/2 -translate-x-1/2 z-30 bg-ink/95 backdrop-blur-sm border border-white/10 rounded-2xl px-4 py-2.5 shadow-xl pointer-events-none select-none whitespace-nowrap" style={{ bottom: 'calc(5rem + env(safe-area-inset-bottom, 0px))' }}>
+          <span className="text-white/60 text-sm">Image ajoutée · </span>
+          <span className="text-accent text-sm font-medium">double-tapez</span>
+          <span className="text-white/60 text-sm"> pour créer un monde · </span>
+          <span className="text-gray-400 text-sm font-mono">Z</span>
+          <span className="text-white/60 text-sm"> pour entrer</span>
+        </div>
+      )}
+
+      {/* First-run spotlight hint */}
+      {showFirstRunHint && !showWelcome && (
+        <div className="fixed z-30 pointer-events-none select-none" style={{ left: toolbarCollapsed ? '2.5rem' : '3.5rem', top: '5rem' }}>
+          <div className="flex items-center gap-2">
+            <div className="relative w-4 h-4 flex-shrink-0">
+              <div className="absolute inset-0 rounded-full bg-accent animate-ping opacity-60" />
+              <div className="absolute inset-0 rounded-full bg-accent opacity-90" />
+            </div>
+            <div className="bg-ink/95 backdrop-blur-sm border border-accent/30 rounded-xl px-3 py-2 shadow-xl text-sm text-white">
+              ✏️ Commencez à dessiner !
+            </div>
+          </div>
+        </div>
+      )}
+
       {showExport && (
         <ExportModal
           state={{ version: 1, rootScene: rootSceneRef.current, viewport: viewportRef.current, savedAt: Date.now(), assets: assetsRef.current }}
@@ -1366,6 +1470,13 @@ export default function App({ initialState, settings }: AppProps) {
         <WelcomeModal onClose={() => {
           localStorage.setItem('ep_welcomed_v1', '1');
           setShowWelcome(false);
+          if (sceneRef.current.nodes.length === 0) {
+            setShowFirstRunHint(true);
+            firstRunHintTimerRef.current = window.setTimeout(() => {
+              setShowFirstRunHint(false);
+              firstRunHintTimerRef.current = null;
+            }, 10000);
+          }
         }} />
       )}
 
