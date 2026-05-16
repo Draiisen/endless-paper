@@ -42,6 +42,9 @@ interface ToolbarProps {
   tourPlaying: boolean;
   collapsed: boolean;
   onToggleCollapsed: () => void;
+  // Scene bounds
+  sceneBounds?: { width: number; height: number } | null;
+  onSetSceneBounds: (bounds: { width: number; height: number } | null) => void;
 }
 
 function ToolButton({ active, onClick, title, children }: { active: boolean; onClick: () => void; title: string; children: React.ReactNode }) {
@@ -52,6 +55,19 @@ function ToolButton({ active, onClick, title, children }: { active: boolean; onC
     >{children}</button>
   );
 }
+
+interface BoundsPreset {
+  label: string;
+  short: string;
+  bounds: { width: number; height: number } | null;
+}
+
+const BOUNDS_PRESETS: BoundsPreset[] = [
+  { label: 'None', short: 'NONE', bounds: null },
+  { label: 'Square 1000×1000', short: '1K²', bounds: { width: 1000, height: 1000 } },
+  { label: '16:9 (1920×1080)', short: '16:9', bounds: { width: 1920, height: 1080 } },
+  { label: 'A4 portrait (2480×3508)', short: 'A4', bounds: { width: 2480, height: 3508 } },
+];
 
 const SYMMETRY_OPTIONS: { value: SymmetryMode; label: string }[] = [
   { value: 'off', label: 'Off' },
@@ -82,9 +98,11 @@ export function Toolbar({
   onSaveToLibrary,
   onAddCamera, hasCameras, onPlayTour, tourPlaying,
   collapsed, onToggleCollapsed,
+  sceneBounds, onSetSceneBounds,
 }: ToolbarProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showSymmetryMenu, setShowSymmetryMenu] = useState(false);
+  const [showBoundsMenu, setShowBoundsMenu] = useState(false);
 
   if (collapsed) {
     return (
@@ -270,6 +288,34 @@ export function Toolbar({
           {tourPlaying ? '■' : '▶'}
         </button>
       )}
+
+      {/* Scene bounds */}
+      <div className="relative w-full flex justify-center">
+        <button
+          className={`w-11 h-9 rounded text-[10px] font-semibold transition-colors flex-shrink-0 touch-manipulation ${sceneBounds ? 'bg-accent/30 text-white border border-accent/40' : 'text-gray-500 active:text-white border border-white/10'}`}
+          onClick={() => setShowBoundsMenu(v => !v)}
+          title="Set world bounds (page size)"
+        >
+          {sceneBounds
+            ? BOUNDS_PRESETS.find(p => p.bounds && p.bounds.width === sceneBounds.width && p.bounds.height === sceneBounds.height)?.short ?? 'BND'
+            : 'BND'}
+        </button>
+        {showBoundsMenu && (
+          <div className="absolute left-12 bottom-0 bg-ink border border-white/10 rounded-lg shadow-xl z-30 min-w-[160px] py-1">
+            {BOUNDS_PRESETS.map(preset => (
+              <button
+                key={preset.label}
+                className={`w-full text-left px-3 py-2.5 text-[12px] touch-manipulation transition-colors ${
+                  (!sceneBounds && !preset.bounds) || (sceneBounds && preset.bounds && sceneBounds.width === preset.bounds.width && sceneBounds.height === preset.bounds.height)
+                    ? 'text-accent'
+                    : 'text-gray-300 active:text-white hover:text-white hover:bg-white/5'
+                }`}
+                onClick={() => { onSetSceneBounds(preset.bounds); setShowBoundsMenu(false); }}
+              >{preset.label}</button>
+            ))}
+          </div>
+        )}
+      </div>
 
     </div>
   );

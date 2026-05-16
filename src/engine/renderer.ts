@@ -35,6 +35,8 @@ export interface RenderOptions {
   animationTime?: number;
   // Marks viewer (presentation) mode — hides editor chrome (enter hints, hotspot badges, portal markers, etc are drawn differently)
   viewerMode?: boolean;
+  // Show scene bounds corner resize handles (drawn in screen space after transform)
+  showBoundsHandles?: boolean;
 }
 
 function isNodeVisible(node: SceneNode, worldLeft: number, worldTop: number, worldRight: number, worldBottom: number): boolean {
@@ -54,7 +56,7 @@ export function renderScene(
   viewport: Viewport,
   options: RenderOptions = {}
 ): void {
-  const { highlightSelected, showGrid = true, selectionRect, enterHintNodeId, showReference = true, startCameraPin, symmetryCenter, pathEditNodeId, pathEditAnchors, pathEditSelectedAnchorIdx, animationTime = 0, viewerMode = false } = options;
+  const { highlightSelected, showGrid = true, selectionRect, enterHintNodeId, showReference = true, startCameraPin, symmetryCenter, pathEditNodeId, pathEditAnchors, pathEditSelectedAnchorIdx, animationTime = 0, viewerMode = false, showBoundsHandles = false } = options;
   const canvas = ctx.canvas;
   const { width, height } = canvas;
 
@@ -77,6 +79,11 @@ export function renderScene(
 
   if (showGrid) {
     drawGrid(ctx, viewport, width, height);
+  }
+
+  // Draw scene bounds (page boundary) before any nodes
+  if (scene.bounds) {
+    drawSceneBounds(ctx, scene.bounds, viewport.scale);
   }
 
   // Build per-layer ordering. If no layers, treat as one default layer order = node insertion.
@@ -159,6 +166,11 @@ export function renderScene(
   }
 
   ctx.restore();
+
+  // Bounds corner handles — drawn in screen space so handles stay pixel-perfect
+  if (scene.bounds && showBoundsHandles && !viewerMode) {
+    drawSceneBoundsHandles(ctx, scene.bounds, viewport);
+  }
 
   if (selectionRect) {
     ctx.save();
@@ -304,6 +316,82 @@ function drawGrid(
     ctx.stroke();
   }
 
+  ctx.restore();
+}
+
+/**
+ * Draw the scene boundary rectangle centered at origin as a subtle white fill + shadow border.
+ * Called while the world-space transform is active, so coordinates are in world units.
+ */
+function drawSceneBounds(
+  ctx: CanvasRenderingContext2D,
+  bounds: { width: number; height: number },
+  scale: number,
+): void {
+  const bx = -bounds.width / 2;
+  const by = -bounds.height / 2;
+  const bw = bounds.width;
+  const bh = bounds.height;
+
+  ctx.save();
+
+  // Slightly lighter/whiter tint inside the bounds area
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.18)';
+  ctx.fillRect(bx, by, bw, bh);
+
+  // Subtle border with a soft shadow
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.22)';
+  ctx.shadowBlur = 16 / scale;
+  ctx.strokeStyle = 'rgba(100, 120, 160, 0.45)';
+  ctx.lineWidth = 1.5 / scale;
+  ctx.setLineDash([8 / scale, 5 / scale]);
+  ctx.strokeRect(bx, by, bw, bh);
+  ctx.setLineDash([]);
+  ctx.shadowColor = 'transparent';
+  ctx.shadowBlur = 0;
+
+  ctx.restore();
+}
+
+/**
+ * Draw corner resize handles for the bounds rectangle in screen space.
+ * The transform is NOT active here — we project world coords to screen coords ourselves.
+ */
+function drawSceneBoundsHandles(
+  ctx: CanvasRenderingContext2D,
+  bounds: { width: number; height: number },
+  viewport: { x: number; y: number; scale: number },
+): void {
+  const bx = -bounds.width / 2;
+  const by = -bounds.height / 2;
+  const bw = bounds.width;
+  const bh = bounds.height;
+  const s = viewport.scale;
+  const ox = viewport.x;
+  const oy = viewport.y;
+
+  // World-to-screen
+  const toScreen = (wx: number, wy: number): [number, number] => [
+    wx * s + ox,
+    wy * s + oy,
+  ];
+
+  const corners: [number, number][] = [
+    toScreen(bx, by),
+    toScreen(bx + bw, by),
+    toScreen(bx, by + bh),
+    toScreen(bx + bw, by + bh),
+  ];
+
+  ctx.save();
+  const r = 6;
+  ctx.fillStyle = '#ffffff';
+  ctx.strokeStyle = 'rgba(100, 120, 200, 0.8)';
+  ctx.lineWidth = 1.5;
+  for (const [cx, cy] of corners) {
+    ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+    ctx.strokeRect(cx - r, cy - r, r * 2, r * 2);
+  }
   ctx.restore();
 }
 
@@ -733,13 +821,27 @@ function drawLens(ctx: CanvasRenderingContext2D, node: SceneNode, viewportScale:
     return;
   }
 
-  // ── Compute inner bounding box ────────────────────────────────────────────
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const n of inner.nodes) {
-    minX = Math.min(minX, n.x);      minY = Math.min(minY, n.y);
-    maxX = Math.max(maxX, n.x + n.width); maxY = Math.max(maxY, n.y + n.height);
+  // ── Compute fit rectangle: use scene bounds if defined, else content bounding box ──
+  let fitX: number, fitY: number, fitW: number, fitH: number;
+  let hasFitRect = false;
+
+  if (inner.bounds) {
+    // Use the declared scene bounds (centered at origin)
+    fitX = -inner.bounds.width / 2;
+    fitY = -inner.bounds.height / 2;
+    fitW = inner.bounds.width;
+    fitH = inner.bounds.height;
+    hasFitRect = true;
+  } else {
+    // Fall back to content bounding box
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const n of inner.nodes) {
+      minX = Math.min(minX, n.x);      minY = Math.min(minY, n.y);
+      maxX = Math.max(maxX, n.x + n.width); maxY = Math.max(maxY, n.y + n.height);
+    }
+    fitX = minX; fitY = minY; fitW = maxX - minX; fitH = maxY - minY;
+    hasFitRect = fitW > 0 && fitH > 0;
   }
-  const bw = maxX - minX, bh = maxY - minY;
 
   ctx.save();
 
@@ -753,14 +855,14 @@ function drawLens(ctx: CanvasRenderingContext2D, node: SceneNode, viewportScale:
   ctx.clip();
 
   // ── Scale inner content to fit node bounds (5 % margin) ──────────────────
-  if (bw > 0 && bh > 0) {
+  if (hasFitRect) {
     const pad = 0.05;
     const s = Math.min(
-      node.width  * (1 - pad * 2) / bw,
-      node.height * (1 - pad * 2) / bh,
+      node.width  * (1 - pad * 2) / fitW,
+      node.height * (1 - pad * 2) / fitH,
     );
-    const ox = node.x + node.width  / 2 - (minX + bw / 2) * s;
-    const oy = node.y + node.height / 2 - (minY + bh / 2) * s;
+    const ox = node.x + node.width  / 2 - (fitX + fitW / 2) * s;
+    const oy = node.y + node.height / 2 - (fitY + fitH / 2) * s;
 
     ctx.transform(s, 0, 0, s, ox, oy);
 

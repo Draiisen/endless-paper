@@ -793,6 +793,12 @@ export default function App({ initialState, settings }: AppProps) {
     handleSceneChange(newScene, viewportRef.current);
   }, [scene, setScene, handleSceneChange]);
 
+  const handleSetSceneBounds = useCallback((bounds: { width: number; height: number } | null) => {
+    const newScene = { ...sceneRef.current, bounds: bounds ?? undefined };
+    setScene(newScene);
+    handleSceneChange(newScene, viewportRef.current);
+  }, [setScene, handleSceneChange]);
+
   // Keyboard shortcuts
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -967,6 +973,8 @@ export default function App({ initialState, settings }: AppProps) {
         tourPlaying={tourPlaying}
         collapsed={toolbarCollapsed}
         onToggleCollapsed={() => setToolbarCollapsed(v => !v)}
+        sceneBounds={scene.bounds ?? null}
+        onSetSceneBounds={handleSetSceneBounds}
       />
 
       {/* ── Mobile toolbar — bottom bar, hidden on sm+ ── */}

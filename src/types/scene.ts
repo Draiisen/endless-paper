@@ -148,6 +148,9 @@ export interface Scene {
   audio?: SceneAudio;
   cameras?: Camera[];
   startCamera?: StartCamera;
+  // Optional page/world boundary, centered at origin (0,0).
+  // The visible rect is { x: -width/2, y: -height/2, width, height }.
+  bounds?: { width: number; height: number };
 }
 
 export interface HistoryEntry {
