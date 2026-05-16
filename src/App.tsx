@@ -20,7 +20,7 @@ import { HelpPanel } from './components/HelpPanel';
 import { StampPanel } from './components/StampPanel';
 import { createTemplate, TemplateName } from './engine/templates';
 import { ColorPicker } from './components/ColorPicker';
-import { WorldSizeSheet, getWorldSizeShort } from './components/WorldSizeSheet';
+import { WorldSizeSheet, getWorldSizeShort, WORLD_SIZE_PRESETS } from './components/WorldSizeSheet';
 
 function makeInitialViewport(): Viewport {
   return { x: window.innerWidth / 2 - 200, y: window.innerHeight / 2 - 150, scale: 1 };
@@ -1161,7 +1161,13 @@ export default function App({ initialState, settings }: AppProps) {
         collapsed={toolbarCollapsed}
         onToggleCollapsed={() => setToolbarCollapsed(v => !v)}
         sceneBounds={scene.bounds ?? null}
-        onSetSceneBounds={handleSetSceneBounds}
+        onSetSceneBounds={(bounds) => {
+          const preset = WORLD_SIZE_PRESETS.find(p =>
+            p.bounds === null ? bounds === null : (bounds != null && p.bounds?.width === bounds.width && p.bounds?.height === bounds.height)
+          );
+          const label = preset?.label ?? (bounds ? `${bounds.width}×${bounds.height}` : '∞ Aucune limite');
+          handleWorldSizeSelect(bounds, label);
+        }}
       />
 
       {/* ── Mobile toolbar — bottom bar, hidden on sm+ ── */}

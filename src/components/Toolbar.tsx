@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { ToolType, SymmetryMode } from '../types/scene';
 import { ColorPicker } from './ColorPicker';
+import { WORLD_SIZE_PRESETS, getWorldSizeShort } from './WorldSizeSheet';
 
 interface ToolbarProps {
   tool: ToolType;
@@ -55,19 +56,6 @@ function ToolButton({ active, onClick, title, children }: { active: boolean; onC
   );
 }
 
-interface BoundsPreset {
-  label: string;
-  short: string;
-  bounds: { width: number; height: number } | null;
-}
-
-const BOUNDS_PRESETS: BoundsPreset[] = [
-  { label: 'Aucune limite', short: '∞', bounds: null },
-  { label: 'Carré 1000×1000', short: '1K²', bounds: { width: 1000, height: 1000 } },
-  { label: '16:9 (1920×1080)', short: '16:9', bounds: { width: 1920, height: 1080 } },
-  { label: 'A4 portrait (2480×3508)', short: 'A4↕', bounds: { width: 2480, height: 3508 } },
-  { label: 'A4 paysage (3508×2480)', short: 'A4↔', bounds: { width: 3508, height: 2480 } },
-];
 
 const SYMMETRY_OPTIONS: { value: SymmetryMode; label: string }[] = [
   { value: 'off', label: 'Désactivée' },
@@ -314,17 +302,15 @@ export function Toolbar({
           onClick={() => setShowBoundsMenu(v => !v)}
           title="Taille du monde (délimitation de page)"
         >
-          {sceneBounds
-            ? BOUNDS_PRESETS.find(p => p.bounds?.width === sceneBounds.width && p.bounds?.height === sceneBounds.height)?.short ?? 'BND'
-            : '⊞'}
+          {sceneBounds ? getWorldSizeShort(sceneBounds) : '⊞'}
         </button>
         {/* Backdrop — closes menu on outside click */}
         {showBoundsMenu && <div className="fixed inset-0 z-20" onClick={() => setShowBoundsMenu(false)} />}
         {showBoundsMenu && (
           <div className="absolute left-full ml-1 bottom-0 bg-ink border border-white/10 rounded-lg shadow-xl z-30 min-w-[180px] py-1">
-            {BOUNDS_PRESETS.map(preset => (
+            {WORLD_SIZE_PRESETS.map(preset => (
               <button
-                key={preset.label}
+                key={preset.testId}
                 className={`w-full text-left px-3 py-2.5 text-[12px] touch-manipulation transition-colors ${
                   (!sceneBounds && !preset.bounds) || (sceneBounds && preset.bounds?.width === sceneBounds.width && preset.bounds?.height === sceneBounds.height)
                     ? 'text-accent font-semibold'
