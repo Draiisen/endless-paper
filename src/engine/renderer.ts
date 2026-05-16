@@ -690,14 +690,12 @@ function drawVectorPath(ctx: CanvasRenderingContext2D, vp: VectorPath): void {
 export const imageCache = new LRUImageCache(50);
 
 /**
- * LOD selection (smart, based on native pixel density):
- *   screenW < 70px          → thumbnail (fast)
- *   zoomed past native res  → color vector layers (crisp at any zoom)
- *   otherwise               → raster original (faithful)
+ * LOD selection:
+ *   screenW < 70px → thumbnail (fast preview at low zoom)
+ *   otherwise      → raster original (faithful at all zoom levels)
  *
- * "Zoomed past native" = (naturalW / node.width) * viewportScale > 1.2,
- * i.e. each screen pixel maps to less than 1 original pixel.
- * Color layers are stored in source-pixel space and mapped via ctx.transform.
+ * Color vector layers are intentionally disabled — the auto-vectorization
+ * produces jagged polygon artifacts that look worse than a pixelated raster.
  */
 function drawImageLOD(ctx: CanvasRenderingContext2D, node: SceneNode, viewportScale: number): void {
   const screenW = node.width * viewportScale;
@@ -711,54 +709,9 @@ function drawImageLOD(ctx: CanvasRenderingContext2D, node: SceneNode, viewportSc
     }
   }
 
-  // ── Compute smooth blend factor between raster and vector ─────────────────
-  // ratio = how many screen pixels per source pixel. >1 means zoomed past native res.
-  // Blend zone 0.8→1.6: vector fades in gradually as user zooms, no hard pop.
-  const lod = node.lod;
-  const nw = lod?.naturalW ?? 0;
-  const hasVectors = !!(lod?.colorLayers && lod.colorLayers.length > 0 &&
-    lod.sourceW > 0 && lod.sourceH > 0 && nw > 0);
-  const ratio = hasVectors && node.width > 0 ? (nw / node.width) * viewportScale : 0;
-  let vectorAlpha = hasVectors ? Math.min(1, Math.max(0, (ratio - 0.8) / 0.8)) : 0;
-
-  // Fade-in when vectors just finished loading (600 ms transition)
-  if (vectorAlpha > 0 && lod?.vectorLoadedAt) {
-    vectorAlpha *= Math.min(1, (Date.now() - lod.vectorLoadedAt) / 600);
-  }
-
-  // ── Legacy monochrome vectorization ──────────────────────────────────────
-  if (!hasVectors && node.isVectorized && node.vectorPaths && node.vectorPaths.length > 0) {
-    if (node.imageData) drawImage(ctx, node);
-    for (const vp of node.vectorPaths) drawVectorPath(ctx, vp);
-    return;
-  }
-
-  // ── Raster base layer — keeps 5% minimum opacity to fill vector coverage gaps (no white holes)
+  // ── Always use raster ─────────────────────────────────────────────────────
   if (node.imageData) {
-    const outerAlpha = ctx.globalAlpha;
-    ctx.globalAlpha = outerAlpha * Math.max(0.05, 1 - vectorAlpha);
     drawImage(ctx, node);
-    ctx.globalAlpha = outerAlpha;
-  }
-
-  // ── Vector layer fades in over the raster as zoom increases ───────────────
-  if (vectorAlpha > 0 && lod?.colorLayers) {
-    const outerAlpha = ctx.globalAlpha;
-    ctx.globalAlpha = outerAlpha * vectorAlpha;
-    ctx.save();
-    ctx.transform(
-      node.width / lod.sourceW, 0,
-      0, node.height / lod.sourceH,
-      node.x, node.y,
-    );
-    for (const layer of lod.colorLayers) {
-      ctx.fillStyle = layer.color;
-      for (const vp of layer.paths) {
-        ctx.fill(getPath2D(vp.d));
-      }
-    }
-    ctx.restore();
-    ctx.globalAlpha = outerAlpha;
   }
 }
 
