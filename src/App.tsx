@@ -1223,7 +1223,7 @@ export default function App({ initialState, settings }: AppProps) {
       {/* ── Mobile toolbar — bottom bar, hidden on sm+ ── */}
       {!viewerMode && (
         <div
-          className="sm:hidden fixed left-0 right-0 z-20 flex items-center gap-1 px-2 bg-ink border-t border-white/10"
+          className="sm:hidden fixed left-0 right-0 z-20 flex items-center gap-1 px-2 bg-ink border-t border-white/10 overflow-x-auto scrollbar-none"
           style={{ bottom: 0, paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 6px)', paddingTop: '6px' }}
         >
           {/* Stroke color */}
@@ -1232,6 +1232,13 @@ export default function App({ initialState, settings }: AppProps) {
             onChange={setStrokeColor}
             title="Couleur trait"
             swatchClassName="w-10 h-10 rounded-full border-2 border-white/30 cursor-pointer flex-shrink-0 touch-manipulation"
+          />
+          {/* Fill color */}
+          <ColorPicker
+            value={fillColor}
+            onChange={setFillColor}
+            title="Couleur fond"
+            swatchClassName="w-8 h-8 rounded-md border-2 border-white/30 cursor-pointer flex-shrink-0 touch-manipulation"
           />
           {/* Stroke width tap-to-cycle */}
           <button
@@ -1251,17 +1258,17 @@ export default function App({ initialState, settings }: AppProps) {
             { id: 'rect',   icon: <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current"><rect x="2" y="4" width="20" height="16" rx="2" fillOpacity="0" stroke="currentColor" strokeWidth="2.5"/></svg> },
             { id: 'circle', icon: <svg viewBox="0 0 24 24" className="w-5 h-5"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="2.5"/></svg> },
             { id: 'text',   icon: <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current"><path d="M5 4v3h5.5v12h3V7H19V4z"/></svg> },
-            { id: 'eraser', icon: <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current"><path d="M15.14 3c-.51 0-1.02.2-1.41.59L2.59 14.73c-.78.77-.78 2.04 0 2.83L5.17 20H20v-2H9.84l-4-4L17 2.94l4 4V8h2V6.59c0-.51-.2-1.02-.59-1.41l-3.86-3.77C14.16 3.2 13.65 3 13.14 3h2z"/></svg> },
+            { id: 'eraser', icon: <svg viewBox="0 0 24 24" className="w-5 h-5"><rect x="2" y="13" width="14" height="8" rx="1.5" fill="none" stroke="currentColor" strokeWidth="2"/><path d="M6 13L16 3l5 5-10 10" stroke="currentColor" strokeWidth="2" fill="none" strokeLinejoin="round"/><line x1="2" y1="21" x2="22" y2="21" stroke="currentColor" strokeWidth="2"/></svg> },
           ] as { id: ToolType; icon: React.ReactNode }[]).map(({ id, icon }) => (
             <button
               key={id}
-              className={`flex-1 h-11 flex items-center justify-center rounded-xl touch-manipulation transition-colors ${tool === id ? 'bg-accent text-white' : 'text-gray-400 active:bg-white/10 active:text-white'}`}
+              className={`w-11 h-11 flex-shrink-0 flex items-center justify-center rounded-xl touch-manipulation transition-colors ${tool === id ? 'bg-accent text-white' : 'text-gray-400 active:bg-white/10 active:text-white'}`}
               onClick={() => setTool(id)}
             >{icon}</button>
           ))}
           <div className="w-px h-8 bg-white/15 flex-shrink-0 mx-0.5" />
           {/* Image import */}
-          <label className="flex-shrink-0 w-10 h-11 flex items-center justify-center rounded-xl text-gray-400 active:bg-white/10 active:text-white touch-manipulation cursor-pointer">
+          <label className="flex-shrink-0 w-11 h-11 flex items-center justify-center rounded-xl text-gray-400 active:bg-white/10 active:text-white touch-manipulation cursor-pointer">
             <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
             <input type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) { handleImageImport(f); (e.target as HTMLInputElement).value = ''; } }} />
           </label>
