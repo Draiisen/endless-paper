@@ -36,6 +36,26 @@ function findSceneById(root: import('../types/scene').Scene, targetId: string): 
   return null;
 }
 
+/** Compute the lens transform (inner-world → world-1 canvas coords) for a node's inner scene. */
+function computeLensTransform(
+  node: import('../types/scene').SceneNode,
+  innerNodes: import('../types/scene').SceneNode[],
+): { s: number; ox: number; oy: number } | null {
+  if (innerNodes.length === 0) return null;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const n of innerNodes) {
+    minX = Math.min(minX, n.x); minY = Math.min(minY, n.y);
+    maxX = Math.max(maxX, n.x + n.width); maxY = Math.max(maxY, n.y + n.height);
+  }
+  const bw = maxX - minX, bh = maxY - minY;
+  if (bw <= 0 || bh <= 0) return null;
+  const pad = 0.05;
+  const s = Math.min(node.width * (1 - pad * 2) / bw, node.height * (1 - pad * 2) / bh);
+  const ox = node.x + node.width  / 2 - (minX + bw / 2) * s;
+  const oy = node.y + node.height / 2 - (minY + bh / 2) * s;
+  return { s, ox, oy };
+}
+
 /** Find which node in the given scene tree hosts the specified inner scene id. */
 function findNodeHostingScene(root: import('../types/scene').Scene, targetSceneId: string): import('../types/scene').SceneNode | null {
   for (const node of root.nodes) {
@@ -307,60 +327,50 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
     };
   }, []);
 
-  const performEnterScene = useCallback((node: SceneNode) => {
-    if (animatingRef.current) return;
+  // immediate=true: switch instantly (used during continuous zoom — no pre-animation)
+  // immediate=false: animate to frame node first, then switch (used for Z key / button)
+  const performEnterScene = useCallback((node: SceneNode, immediate = false) => {
+    if (animatingRef.current && !immediate) return;
 
-    const target = frameNodeViewport(node);
-    animateViewport(target, 300, () => {
+    const canvas = canvasRef.current;
+    const w = canvas?.width ?? window.innerWidth;
+    const h = canvas?.height ?? window.innerHeight;
+
+    const doEnter = () => {
       const updatedNode = ensureInnerScene(node);
       const updatedScene = updateNode(sceneRef.current, node.id, { innerScene: updatedNode.innerScene });
       const stack = sceneStackRef.current;
+      const innerNodes = updatedNode.innerScene?.nodes ?? [];
+
+      // Compute lens transform (same math as drawLens in renderer)
+      const lt = computeLensTransform(node, innerNodes);
+      const vp = viewportRef.current;
+
+      // innerVp: world-2 viewport so inner content appears at exact same screen position
+      // as through the lens. No visual jump.
+      let innerVp: Viewport;
+      if (lt) {
+        innerVp = {
+          scale: lt.s * vp.scale,
+          x: lt.ox * vp.scale + vp.x,
+          y: lt.oy * vp.scale + vp.y,
+        };
+      } else {
+        innerVp = { x: w / 2, y: h / 2, scale: 1 };
+      }
 
       const newStack: SceneLevel[] = [
         ...stack.slice(0, -1),
-        { ...stack[stack.length - 1], scene: updatedScene, viewportWhenLeft: viewportRef.current },
+        { ...stack[stack.length - 1], scene: updatedScene, viewportWhenLeft: vp },
         {
           scene: updatedNode.innerScene!,
           parentNodeId: node.id,
           label: nodeLabel(node),
           viewportWhenLeft: { x: 0, y: 0, scale: 1 },
+          lensTransform: lt ?? undefined,
         },
       ];
 
-      const canvas = canvasRef.current;
-      const w = canvas?.width ?? window.innerWidth;
-      const h = canvas?.height ?? window.innerHeight;
-
-      // Seamless viewport: compute the viewport that makes world-2 appear at the
-      // exact same position/scale as the lens preview did in world-1, so there is
-      // no visible jump when the scene switches.
-      const innerNodes = updatedNode.innerScene?.nodes ?? [];
-      let innerVp: Viewport;
-      if (innerNodes.length > 0) {
-        const bounds = getBoundingBox(innerNodes);
-        const bw = bounds.width, bh = bounds.height;
-        if (bw > 0 && bh > 0) {
-          const pad = 0.05;
-          const s = Math.min(
-            node.width  * (1 - pad * 2) / bw,
-            node.height * (1 - pad * 2) / bh,
-          );
-          const ox = node.x + node.width  / 2 - (bounds.x + bw / 2) * s;
-          const oy = node.y + node.height / 2 - (bounds.y + bh / 2) * s;
-          const vp = viewportRef.current; // viewport at moment of entry (node fills screen)
-          innerVp = {
-            scale: s * vp.scale,
-            x: ox * vp.scale + vp.x,
-            y: oy * vp.scale + vp.y,
-          };
-        } else {
-          innerVp = { x: w / 2, y: h / 2, scale: 1 };
-        }
-      } else {
-        innerVp = { x: w / 2, y: h / 2, scale: 1 };
-      }
-
-      // Prevent auto-exit from firing immediately after entry.
       lastAutoExitTimeRef.current = Date.now();
       prevScaleRef.current = innerVp.scale;
       setSceneStack(newStack);
@@ -371,7 +381,13 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
       setEnterHintNodeId(null);
       setAutoEnterToast(null);
       markDirty();
-    });
+    };
+
+    if (immediate) {
+      doEnter();
+    } else {
+      animateViewport(frameNodeViewport(node), 300, doEnter);
+    }
   }, [frameNodeViewport, animateViewport, setScene, setViewport, setSceneStack, setSelectedNodeIds, markDirty]);
 
   // Marquee selection state — also tracked in gestures hook; we only keep this
@@ -1019,15 +1035,16 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
 
     if (autoCandidate && zoomingIn) {
       lastWheelDeltaY.current = 0;
-      performEnterScene(autoCandidate);
+      // immediate=true: no pre-animation, content stays locked in place
+      performEnterScene(autoCandidate, true);
       return;
     }
 
-    // Auto-exit: if zoomed out enough that scene occupies < 30% of viewport area
+    // Auto-exit: if zoomed out enough that the inner scene is < 30% of viewport area
     const stack = sceneStackRef.current;
     if (zoomingOut && stack.length > 1) {
       const now = Date.now();
-      if (now - lastAutoExitTimeRef.current > 1000) {
+      if (now - lastAutoExitTimeRef.current > 800) {
         const nodes = sceneRef.current.nodes;
         if (nodes.length > 0) {
           const bb = getBoundingBox(nodes);
@@ -1037,11 +1054,30 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
           const viewportArea = w * h;
           if (sceneScreenArea > 0 && sceneScreenArea < viewportArea * 0.30) {
             lastAutoExitTimeRef.current = now;
+            const currentLevel = stack[stack.length - 1];
             const parentEntry = stack[stack.length - 2];
             const newStack = stack.slice(0, -1);
+
+            // Seamless exit: invert the lens transform so world-1 content appears at
+            // the exact same screen position as it would through the lens right now.
+            let parentVp: Viewport;
+            const lt = currentLevel.lensTransform;
+            if (lt) {
+              const vp2 = viewportRef.current;
+              const parentScale = vp2.scale / lt.s;
+              parentVp = {
+                scale: parentScale,
+                x: vp2.x - lt.ox * parentScale,
+                y: vp2.y - lt.oy * parentScale,
+              };
+            } else {
+              parentVp = parentEntry.viewportWhenLeft;
+            }
+
             setScene(parentEntry.scene);
-            setViewport(parentEntry.viewportWhenLeft);
-            viewportRef.current = parentEntry.viewportWhenLeft;
+            setViewport(parentVp);
+            viewportRef.current = parentVp;
+            prevScaleRef.current = parentVp.scale;
             setSceneStack(newStack);
             setSelectedNodeIds(new Set());
             setEnterHintNodeId(null);

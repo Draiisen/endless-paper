@@ -161,6 +161,8 @@ export interface SceneLevel {
   label: string;          // display name for breadcrumb
   viewportWhenLeft: Viewport;  // restore when going back
   enterFromNodeRect?: { x: number; y: number; width: number; height: number; scale: number };
+  // Stored at entry time so exit can compute the seamless inverse viewport
+  lensTransform?: { s: number; ox: number; oy: number };
 }
 
 export interface Asset {
