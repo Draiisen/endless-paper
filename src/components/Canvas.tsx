@@ -116,6 +116,7 @@ interface CanvasProps {
   onDropImageFile?: (file: File, worldX: number, worldY: number) => void;
   stamps?: import('../types/scene').BrushStamp[];
   activeStampId?: string | null;
+  onUpdateStartCamera?: (newVp: Viewport, commit?: boolean) => void;
 }
 
 interface TextEditState {
@@ -148,6 +149,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   onDropImageFile,
   stamps = [],
   activeStampId = null,
+  onUpdateStartCamera,
 }, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number>(0);
@@ -212,6 +214,19 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   // Auto-exit zoom debounce
   const lastAutoExitTimeRef = useRef(0);
 
+  // Zoom focal point — updated by onZoom, used by auto-enter to pick correct node
+  const zoomFocusRef = useRef<{ worldX: number; worldY: number; screenX: number; screenY: number; at: number } | null>(null);
+
+  // Start-camera pin drag state
+  const pinDragRef = useRef<{ isDragging: boolean; currentStartVp: Viewport } | null>(null);
+  const pinHoverRef = useRef(false);
+  const pinToastTimerRef = useRef<number | null>(null);
+  const [pinHover, setPinHover] = useState(false);
+  const [pinDragging, setPinDragging] = useState(false);
+  const [pinToast, setPinToast] = useState<string | null>(null);
+  const onUpdateStartCameraRef = useRef(onUpdateStartCamera);
+  useEffect(() => { onUpdateStartCameraRef.current = onUpdateStartCamera; }, [onUpdateStartCamera]);
+
   // Crossfade state — drives the seamless zoom-through experience
   // progress: 0 = fully outer (world-1), 1 = fully inner (world-2)
   const crossfadeRef = useRef<{
@@ -275,6 +290,38 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   useEffect(() => { viewerModeRef.current = viewerMode; needsRenderRef.current = true; }, [viewerMode]);
   useEffect(() => { showReferenceRef.current = showReference; needsRenderRef.current = true; }, [showReference]);
   useEffect(() => { activeLayerIdRef.current = activeLayerId; }, [activeLayerId]);
+
+  // Native mousemove listener to track hover over startCameraPin (for cursor change)
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const onMouseMove = (e: MouseEvent) => {
+      if (viewerModeRef.current || toolRef.current !== 'select') {
+        if (pinHoverRef.current) { setPinHover(false); pinHoverRef.current = false; }
+        return;
+      }
+      const rootStartCam = sceneStackRef.current[0]?.scene?.startCamera;
+      if (!rootStartCam) {
+        if (pinHoverRef.current) { setPinHover(false); pinHoverRef.current = false; }
+        return;
+      }
+      const vp = rootStartCam.viewport;
+      const cw = canvas.width;
+      const ch = canvas.height;
+      const pinX = (cw / 2 - vp.x) / vp.scale;
+      const pinY = (ch / 2 - vp.y) / vp.scale;
+      const hitR = Math.max(16 / viewportRef.current.scale, 8);
+      const curWorldX = (e.clientX - viewportRef.current.x) / viewportRef.current.scale;
+      const curWorldY = (e.clientY - viewportRef.current.y) / viewportRef.current.scale;
+      const isHover = Math.hypot(curWorldX - pinX, curWorldY - pinY) <= hitR;
+      if (isHover !== pinHoverRef.current) {
+        setPinHover(isHover);
+        pinHoverRef.current = isHover;
+      }
+    };
+    canvas.addEventListener('mousemove', onMouseMove);
+    return () => canvas.removeEventListener('mousemove', onMouseMove);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Explicitly focus the textarea when a text edit session opens (autoFocus alone fails on iOS)
   const textEditKey = textEdit ? `${textEdit.worldX.toFixed(0)}-${textEdit.worldY.toFixed(0)}` : null;
@@ -457,7 +504,10 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
 
   const gestureCallbacks = {
     onPan: useCallback(() => { markDirty(); }, [markDirty]),
-    onZoom: useCallback(() => { markDirty(); }, [markDirty]),
+    onZoom: useCallback((_vp: Viewport, focal?: { screenX: number; screenY: number; worldX: number; worldY: number }) => {
+      if (focal) zoomFocusRef.current = { ...focal, at: Date.now() };
+      markDirty();
+    }, [markDirty]),
 
     onStrokeEnd: useCallback((path: VectorPath, minX: number, minY: number, maxX: number, maxY: number) => {
       const margin = strokeWidthRef.current;
@@ -549,6 +599,25 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
     onShapeMove: useCallback(() => { markDirty(); }, [markDirty]),
 
     onSelect: useCallback((worldX: number, worldY: number, additive: boolean) => {
+      // Hit-test startCameraPin first (edit mode only, select tool)
+      if (!viewerModeRef.current && toolRef.current === 'select') {
+        const rootStartCam = sceneStackRef.current[0]?.scene?.startCamera;
+        if (rootStartCam) {
+          const canvas = canvasRef.current;
+          const cw = canvas?.width ?? window.innerWidth;
+          const ch = canvas?.height ?? window.innerHeight;
+          const vp = rootStartCam.viewport;
+          const pinX = (cw / 2 - vp.x) / vp.scale;
+          const pinY = (ch / 2 - vp.y) / vp.scale;
+          const hitR = Math.max(16 / viewportRef.current.scale, 8);
+          if (Math.hypot(worldX - pinX, worldY - pinY) <= hitR) {
+            pinDragRef.current = { isDragging: true, currentStartVp: vp };
+            draggedNodeIdsRef.current = new Set();
+            setPinDragging(true);
+            return;
+          }
+        }
+      }
       // Pathedit: hit-test handles then anchors (handles are on top visually)
       if (toolRef.current === 'pathedit' && pathAnchorsRef.current.length > 0) {
         const hitR = Math.max(7, 9 / viewportRef.current.scale);
@@ -691,6 +760,23 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
     }, [setSelectedNodeIds, markDirty, onHotspotClick, setScene, setViewport, setSceneStack]),
 
     onDragMove: useCallback((dx: number, dy: number) => {
+      // Start-camera pin drag
+      if (pinDragRef.current?.isDragging) {
+        const pd = pinDragRef.current;
+        const canvas = canvasRef.current;
+        const cw = canvas?.width ?? window.innerWidth;
+        const ch = canvas?.height ?? window.innerHeight;
+        const vp = pd.currentStartVp;
+        const oldPinX = (cw / 2 - vp.x) / vp.scale;
+        const oldPinY = (ch / 2 - vp.y) / vp.scale;
+        const newPinX = oldPinX + dx;
+        const newPinY = oldPinY + dy;
+        const newStartVp: Viewport = { scale: vp.scale, x: cw / 2 - newPinX * vp.scale, y: ch / 2 - newPinY * vp.scale };
+        pd.currentStartVp = newStartVp;
+        onUpdateStartCameraRef.current?.(newStartVp, false);
+        markDirty();
+        return;
+      }
       // Pathedit anchor drag
       if (toolRef.current === 'pathedit' && dragAnchorIdxRef.current !== null) {
         const idx = dragAnchorIdxRef.current;
@@ -806,6 +892,21 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
     }, [setScene, markDirty]),
 
     onDragEnd: useCallback(() => {
+      // Start-camera pin drag: commit
+      if (pinDragRef.current?.isDragging) {
+        const newStartVp = pinDragRef.current.currentStartVp;
+        pinDragRef.current = null;
+        setPinDragging(false);
+        onUpdateStartCameraRef.current?.(newStartVp, true);
+        if (pinToastTimerRef.current !== null) clearTimeout(pinToastTimerRef.current);
+        setPinToast('Point de départ déplacé');
+        pinToastTimerRef.current = window.setTimeout(() => {
+          setPinToast(null);
+          pinToastTimerRef.current = null;
+        }, 2500);
+        markDirty();
+        return;
+      }
       // Pathedit: commit anchor changes to scene
       if (toolRef.current === 'pathedit' && dragAnchorIdxRef.current !== null) {
         dragAnchorIdxRef.current = null;
@@ -1110,6 +1211,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
               pathEditSelectedAnchorIdx: selectedAnchorIdxRef.current,
               animationTime: Date.now(),
               startCameraPin,
+              startCameraPinDragging: !!pinDragRef.current?.isDragging,
               showBoundsHandles: !viewerModeRef.current && !!sceneRef.current.bounds,
             });
 
@@ -1272,6 +1374,23 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
     const currentScene = sceneRef.current;
 
     // ── ENTER: look for a lens node to fade into ───────────────────────────────
+    // Determine zoom focal point — use where the user is actually zooming
+    const FOCAL_TTL = 1000; // ms; focal older than this → fall back to screen center
+    const focal = zoomFocusRef.current;
+    const focalAge = focal ? Date.now() - focal.at : Infinity;
+    const isMobile = w < 640;
+    const tolPx = isMobile ? 24 : 8;
+    const tolWorld = tolPx / viewport.scale;
+    let focalWorldX: number, focalWorldY: number;
+    if (focal && focalAge < FOCAL_TTL) {
+      focalWorldX = focal.worldX;
+      focalWorldY = focal.worldY;
+    } else {
+      // Fallback: treat screen center as focal
+      focalWorldX = (w / 2 - viewport.x) / viewport.scale;
+      focalWorldY = (h / 2 - viewport.y) / viewport.scale;
+    }
+
     let enterNode: SceneNode | null = null;
     let enterRatio = 0;
     let hintNode: SceneNode | null = null;
@@ -1280,16 +1399,25 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
       if (!node.innerScene) continue;
       // Skip unbounded empty scenes — no fit rect can be computed, can't crossfade
       if (node.innerScene.nodes.length === 0 && !node.innerScene.bounds) continue;
+      // Only consider nodes that contain the focal point (with tolerance)
+      const containsFocal =
+        focalWorldX >= node.x - tolWorld && focalWorldX <= node.x + node.width + tolWorld &&
+        focalWorldY >= node.y - tolWorld && focalWorldY <= node.y + node.height + tolWorld;
+      if (!containsFocal) continue;
       const sw = node.width * viewport.scale;
       const sh = node.height * viewport.scale;
       const ratio = Math.min(sw / w, sh / h);
       if (ratio > enterRatio) { enterRatio = ratio; enterNode = node; }
-      if (ratio > 0.2 && !enterNode) hintNode = node;
+      if (ratio > 0.2 && !hintNode) hintNode = node;
     }
-    // hint for any node (including empty/unbounded — user can still Z into them)
+    // hint for nodes containing focal (including empty/unbounded — user can still Z into them)
     if (!hintNode && !enterNode) {
       for (const node of currentScene.nodes) {
         if (!node.innerScene) continue;
+        const containsFocal =
+          focalWorldX >= node.x - tolWorld && focalWorldX <= node.x + node.width + tolWorld &&
+          focalWorldY >= node.y - tolWorld && focalWorldY <= node.y + node.height + tolWorld;
+        if (!containsFocal) continue;
         const ratio = Math.min(node.width * viewport.scale / w, node.height * viewport.scale / h);
         if (ratio > 0.2) { hintNode = node; break; }
       }
@@ -1563,6 +1691,8 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   // Custom cursor for pen+pressure
   const getCursor = (): string => {
     if (textEdit) return 'text';
+    if (tool === 'select' && pinDragging) return 'grabbing';
+    if (tool === 'select' && pinHover) return 'grab';
     switch (tool) {
       case 'hand': return 'grab';
       case 'pen': {
@@ -1605,6 +1735,12 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
       {autoEnterToast && (
         <div className="fixed left-1/2 bottom-16 -translate-x-1/2 bg-ink/90 text-white text-xs px-3 py-1.5 rounded-full backdrop-blur-sm z-30 pointer-events-none animate-pulse">
           {autoEnterToast}
+        </div>
+      )}
+
+      {pinToast && (
+        <div className="fixed left-1/2 bottom-24 -translate-x-1/2 bg-ink/95 border border-white/10 text-white text-xs px-4 py-2 rounded-full backdrop-blur-sm z-30 pointer-events-none shadow-xl">
+          {pinToast}
         </div>
       )}
 

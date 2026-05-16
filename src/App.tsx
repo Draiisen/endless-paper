@@ -496,6 +496,25 @@ export default function App({ initialState, settings }: AppProps) {
     scheduleAutoSave();
   }, [getRootScene, setScene, handleSceneChange, setSceneStack, scheduleAutoSave]);
 
+  const handleUpdateStartCamera = useCallback((newVp: Viewport, commit = false) => {
+    const root = getRootScene();
+    if (!root.startCamera) return;
+    const newRoot = { ...root, startCamera: { ...root.startCamera, viewport: newVp } };
+    rootSceneRef.current = newRoot;
+    const stack = sceneStackRef.current;
+    if (stack.length === 1) {
+      setScene(newRoot);
+    } else {
+      const newStack = [...stack];
+      newStack[0] = { ...newStack[0], scene: newRoot };
+      setSceneStack(newStack);
+    }
+    if (commit) {
+      history.push(newRoot, viewportRef.current);
+      scheduleAutoSave();
+    }
+  }, [getRootScene, setScene, setSceneStack, history, scheduleAutoSave]);
+
   const navigateToScenePath = useCallback((scenePath: string[], targetViewport: Viewport) => {
     const root = getRootScene();
     setSelectedNodeIds(new Set());
@@ -1148,6 +1167,7 @@ export default function App({ initialState, settings }: AppProps) {
         onDropImageFile={handleDropImageFile}
         stamps={stamps}
         activeStampId={activeStampId}
+        onUpdateStartCamera={handleUpdateStartCamera}
       />
 
       <Toolbar

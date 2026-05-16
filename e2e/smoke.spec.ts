@@ -901,3 +901,218 @@ test('mobile menu — Bibliothèque button opens asset library', async ({ page }
   // Library panel header should be visible
   await expect(page.getByText('Library', { exact: true })).toBeVisible({ timeout: 3000 });
 });
+
+// ── Zoom focal point tests ──────────────────────────────────────────────────
+// Two nodes A (world 0,0..1400,900) and B (world 1600,0..1400,900) with innerScenes.
+// Viewport { x:-1600, y:-300, scale:1.45 } shows A on screen-left (x:0–430) and
+// B on screen-right (x:720–1280).  scale=1.45 → ratio ≈ 1.59 < 1.75 threshold.
+// After 3 wheel-up events (each ×1.1): scale ≈ 1.93 > 1.75 → auto-enter fires.
+// Cursor at x=200 → focal inside A, outside B → A is entered.
+// Cursor at x=1100 → focal inside B, outside A → B is entered.
+// Each inner scene fills the viewport with a giant solid-color rect for reliable pixel check.
+
+// Canvas is 1280×800 (see playwright.config.ts viewport).
+// Node A (world 0,0..1400,900) at scale=1.45, vp.x=-1600: screen x 0→430  (left portion visible).
+// Node B (world 1600,0..1400,900):                          screen x 720→1280 (right portion visible).
+// ratio = min(1400×1.45/1280, 900×1.45/800) ≈ min(1.59,1.63) = 1.59 < 1.75 threshold.
+// After 3 wheel-up steps (×1.1 each): scale ≈ 1.93 > 1.75 → auto-enter fires.
+// Inner scenes use a distinctive background color; `bounds` satisfies the non-empty check.
+// Any canvas pixel not on a grid line will show the inner scene background.
+function buildFocalSeed() {
+  return {
+    version: 1,
+    viewport: { x: -1600, y: -300, scale: 1.45 },
+    savedAt: Date.now(),
+    assets: [],
+    rootScene: {
+      id: 'root-focal',
+      background: '#888888',
+      layers: [{ id: 'layer-default', name: 'Default', visible: true, locked: false, opacity: 1 }],
+      cameras: [],
+      nodes: [
+        {
+          id: 'focal-node-a', type: 'rect',
+          x: 0, y: 0, width: 1400, height: 900,
+          fill: '#bbccee', stroke: 'none', strokeWidth: 0,
+          layerId: 'layer-default',
+          innerScene: {
+            id: 'inner-scene-a',
+            background: '#00cc66',
+            bounds: { width: 500, height: 500 },
+            nodes: [],
+          },
+        },
+        {
+          id: 'focal-node-b', type: 'rect',
+          x: 1600, y: 0, width: 1400, height: 900,
+          fill: '#eeccbb', stroke: 'none', strokeWidth: 0,
+          layerId: 'layer-default',
+          innerScene: {
+            id: 'inner-scene-b',
+            background: '#cc0055',
+            bounds: { width: 500, height: 500 },
+            nodes: [],
+          },
+        },
+      ],
+    },
+  };
+}
+
+async function sampleCanvasPixel(page: Page, px: number, py: number): Promise<string> {
+  return page.evaluate(([x, y]) => {
+    const c = document.querySelector('canvas') as HTMLCanvasElement;
+    const d = c.getContext('2d')!.getImageData(x, y, 1, 1).data;
+    return `${d[0]},${d[1]},${d[2]}`;
+  }, [px, py]);
+}
+
+test('zoom focal — zooming near node A enters inner-scene-a, not B', async ({ page }) => {
+  const seed = buildFocalSeed();
+  await page.addInitScript((state) => {
+    localStorage.setItem('endless-paper-autosave', JSON.stringify(state));
+    localStorage.setItem('ep_welcomed_v1', '1');
+  }, seed);
+
+  await page.goto('/');
+  await waitForCanvas(page);
+
+  // screen x=200 → world x≈1241 (inside A: 0–1400, outside B: 1600+). y=400 = canvas center.
+  await page.mouse.move(200, 400);
+
+  // 3× zoom-in (1.45 × 1.1³ ≈ 1.93 > 1.75 threshold)
+  for (let i = 0; i < 3; i++) {
+    await page.mouse.wheel(0, -300);
+    await page.waitForTimeout(80);
+  }
+
+  // Escape button appears when sceneStack.length > 1 (we entered a scene)
+  await page.waitForSelector('button[title="Escape"]', { timeout: 6000 });
+  await page.waitForTimeout(200);
+
+  // inner-scene-a background is #00cc66. Scan middle strip; majority must be green.
+  const greenFraction = await page.evaluate(() => {
+    const c = document.querySelector('canvas') as HTMLCanvasElement;
+    const data = c.getContext('2d')!.getImageData(0, 350, c.width, 100).data;
+    let match = 0, total = data.length / 4;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i] < 40 && data[i + 1] > 150 && data[i + 2] < 130) match++;
+    }
+    return match / total;
+  });
+  expect(greenFraction).toBeGreaterThan(0.5);
+});
+
+test('zoom focal — zooming near node B enters inner-scene-b, not A', async ({ page }) => {
+  const seed = buildFocalSeed();
+  await page.addInitScript((state) => {
+    localStorage.setItem('endless-paper-autosave', JSON.stringify(state));
+    localStorage.setItem('ep_welcomed_v1', '1');
+  }, seed);
+
+  await page.goto('/');
+  await waitForCanvas(page);
+
+  // screen x=1100 → world x≈1862 (inside B: 1600–3000, outside A: 0–1400).
+  await page.mouse.move(1100, 400);
+
+  for (let i = 0; i < 3; i++) {
+    await page.mouse.wheel(0, -300);
+    await page.waitForTimeout(80);
+  }
+
+  await page.waitForSelector('button[title="Escape"]', { timeout: 6000 });
+  await page.waitForTimeout(200);
+
+  // inner-scene-b background is #cc0055. Scan middle strip; majority must be red.
+  const redFraction = await page.evaluate(() => {
+    const c = document.querySelector('canvas') as HTMLCanvasElement;
+    const data = c.getContext('2d')!.getImageData(0, 350, c.width, 100).data;
+    let match = 0, total = data.length / 4;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i] > 150 && data[i + 1] < 40 && data[i + 2] < 120) match++;
+    }
+    return match / total;
+  });
+  expect(redFraction).toBeGreaterThan(0.5);
+});
+
+// ── Start camera pin drag test ──────────────────────────────────────────────
+// Effective canvas is 1280×720 (devices['Desktop Chrome'] in playwright.config.ts projects overrides
+// the top-level viewport: { width:1280, height:800 } with 1280×720).
+// startCamera.viewport { x:500, y:300, scale:1 } → pin world: (640-500)/1=140, (360-300)/1=60.
+// Current viewport { x:640, y:400, scale:1 } → pin screen: (140+640, 60+400) = (780, 460).
+// NOTE: scene must have ≥1 node to prevent App.tsx auto-recenter (makeInitialViewport) on blank scenes.
+// A dummy node at world (-2000,-2000) is placed off-screen so it doesn't interfere visually.
+// Drag from (780,460) to (680,260): screen Δ=(-100,-200) → world Δ=(-100,-200) at scale=1
+// → new pin=(40,-140) → new startCamera { x:640-40=600, y:360-(-140)=500, scale:1 }.
+
+test('pin drag — dragging startCameraPin updates startCamera and survives reset', async ({ page }) => {
+  const pinSeed = {
+    version: 1,
+    viewport: { x: 640, y: 400, scale: 1 },
+    savedAt: Date.now(),
+    assets: [],
+    rootScene: {
+      id: 'root-pin-drag',
+      background: '#f0f0f0',
+      layers: [{ id: 'layer-default', name: 'Default', visible: true, locked: false, opacity: 1 }],
+      cameras: [],
+      startCamera: { viewport: { x: 500, y: 300, scale: 1 }, scenePath: [] },
+      // Dummy node far off-screen prevents App.tsx from auto-recentering the viewport on blank scenes
+      nodes: [{ id: 'anchor', type: 'rect', x: -2000, y: -2000, width: 10, height: 10,
+        fill: '#ffffff', stroke: 'none', strokeWidth: 0, layerId: 'layer-default' }],
+    },
+  };
+  await page.addInitScript((state) => {
+    localStorage.setItem('endless-paper-autosave', JSON.stringify(state));
+    localStorage.setItem('ep_welcomed_v1', '1');
+  }, pinSeed);
+
+  await page.goto('/');
+  await waitForCanvas(page);
+
+  // Select tool required for pin hit-test
+  await page.keyboard.press('v');
+  await page.waitForTimeout(150);
+
+  // Pin at screen (780, 460). Drag 100px left, 200px up → new startCamera {x:600, y:500, scale:1}.
+  await page.mouse.move(780, 460);
+  await page.mouse.down();
+  await page.mouse.move(680, 260, { steps: 10 });
+  await page.mouse.up();
+
+  // Toast confirms the drag was committed
+  await page.waitForSelector('text=Point de départ déplacé', { timeout: 3000 });
+
+  // Wait for autosave debounce (500ms) + IDB write
+  await page.waitForTimeout(800);
+
+  // Verify new startCamera.viewport written to IDB
+  const startCamVp = await page.evaluate(async () => {
+    return new Promise<{ x: number; y: number; scale: number } | null>((resolve) => {
+      const req = indexedDB.open('endless-paper', 1);
+      req.onsuccess = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains('state')) { resolve(null); return; }
+        const tx = db.transaction('state', 'readonly');
+        const gr = tx.objectStore('state').get('autosave');
+        gr.onsuccess = () => resolve((gr.result as any)?.rootScene?.startCamera?.viewport ?? null);
+        gr.onerror = () => resolve(null);
+      };
+      req.onerror = () => resolve(null);
+    });
+  });
+
+  expect(startCamVp).not.toBeNull();
+  expect(startCamVp!.scale).toBeCloseTo(1, 5);
+  expect(startCamVp!.x).toBeCloseTo(600, 0);
+  expect(startCamVp!.y).toBeCloseTo(500, 0);
+
+  // Click Reset to Start — viewport changes to the new startCamera viewport
+  await page.click('button[title="Revenir à la vue de départ"]');
+  await page.waitForTimeout(300);
+
+  // The ⟳ button must still exist (startCamera persisted)
+  await expect(page.locator('button[title="Revenir à la vue de départ"]')).toBeVisible();
+});

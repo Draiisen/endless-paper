@@ -25,6 +25,7 @@ export interface RenderOptions {
   showReference?: boolean;
   // For drawing the start-camera pin in world space
   startCameraPin?: { x: number; y: number } | null;
+  startCameraPinDragging?: boolean;
   // Symmetry center (world coords) — drawn as crosshair
   symmetryCenter?: { x: number; y: number } | null;
   // For path edit mode
@@ -56,7 +57,7 @@ export function renderScene(
   viewport: Viewport,
   options: RenderOptions = {}
 ): void {
-  const { highlightSelected, showGrid = true, selectionRect, enterHintNodeId, showReference = true, startCameraPin, symmetryCenter, pathEditNodeId, pathEditAnchors, pathEditSelectedAnchorIdx, animationTime = 0, viewerMode = false, showBoundsHandles = false } = options;
+  const { highlightSelected, showGrid = true, selectionRect, enterHintNodeId, showReference = true, startCameraPin, startCameraPinDragging = false, symmetryCenter, pathEditNodeId, pathEditAnchors, pathEditSelectedAnchorIdx, animationTime = 0, viewerMode = false, showBoundsHandles = false } = options;
   const canvas = ctx.canvas;
   const { width, height } = canvas;
 
@@ -152,7 +153,7 @@ export function renderScene(
 
   // Start-camera pin
   if (startCameraPin && !viewerMode) {
-    drawStartPin(ctx, startCameraPin.x, startCameraPin.y, viewport.scale);
+    drawStartPin(ctx, startCameraPin.x, startCameraPin.y, viewport.scale, startCameraPinDragging);
   }
 
   // Symmetry crosshair
@@ -202,12 +203,12 @@ function drawSelectionRectOutline(
   ctx.restore();
 }
 
-function drawStartPin(ctx: CanvasRenderingContext2D, x: number, y: number, scale: number): void {
+function drawStartPin(ctx: CanvasRenderingContext2D, x: number, y: number, scale: number, dragging = false): void {
   ctx.save();
-  const r = 14 / scale;
+  const r = (dragging ? 20 : 14) / scale;
   ctx.strokeStyle = '#e63946';
-  ctx.fillStyle = 'rgba(230, 57, 70, 0.18)';
-  ctx.lineWidth = 2 / scale;
+  ctx.fillStyle = dragging ? 'rgba(230, 57, 70, 0.35)' : 'rgba(230, 57, 70, 0.18)';
+  ctx.lineWidth = (dragging ? 2.5 : 2) / scale;
   ctx.beginPath();
   ctx.arc(x, y, r, 0, Math.PI * 2);
   ctx.fill();

@@ -13,7 +13,7 @@ export interface GestureCallbacks {
   onPanStart?: () => void;
   onPan?: (dx: number, dy: number) => void;
   onPanEnd?: () => void;
-  onZoom?: (viewport: Viewport) => void;
+  onZoom?: (viewport: Viewport, focal?: { screenX: number; screenY: number; worldX: number; worldY: number }) => void;
   onStrokeStart?: (worldX: number, worldY: number) => void;
   onStrokeMove?: (worldX: number, worldY: number) => void;
   onStrokeEnd?: (path: VectorPath, minX: number, minY: number, maxX: number, maxY: number) => void;
@@ -416,6 +416,7 @@ export function useGestures(
         const panDy = cy - lastPointer.current.y;
 
         const viewport = getViewport();
+        const focalWorld = screenToWorld(cx, cy, viewport);
         let vp = { ...viewport, x: viewport.x + panDx, y: viewport.y + panDy };
 
         // Zoom by distance delta
@@ -426,7 +427,7 @@ export function useGestures(
           }
         }
         setViewport(vp);
-        callbacksRef.current.onZoom?.(vp);
+        callbacksRef.current.onZoom?.(vp, { screenX: cx, screenY: cy, worldX: focalWorld.x, worldY: focalWorld.y });
 
         lastPinchDist.current = newDist;
         lastPointer.current = { x: cx, y: cy };
@@ -605,10 +606,11 @@ export function useGestures(
     e.preventDefault();
 
     const viewport = getViewport();
+    const focalWorld = screenToWorld(e.clientX, e.clientY, viewport);
     const delta = -e.deltaY;
     const newViewport = zoomAt(viewport, e.clientX, e.clientY, delta);
     setViewport(newViewport);
-    callbacksRef.current.onZoom?.(newViewport);
+    callbacksRef.current.onZoom?.(newViewport, { screenX: e.clientX, screenY: e.clientY, worldX: focalWorld.x, worldY: focalWorld.y });
   }, [getViewport, setViewport]);
 
   const getLivePoints = useCallback(() => livePointsRef.current, []);
