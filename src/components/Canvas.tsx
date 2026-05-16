@@ -164,6 +164,13 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
     origX: number; origY: number; origW: number; origH: number;
     accumDx: number; accumDy: number;
   } | null>(null);
+  // Bounds resize drag state — handles the 8 drag handles on scene.bounds
+  const boundsResizeRef = useRef<{
+    handleIdx: number;          // 0-3: corners (both axes), 4-5: top/bottom (H), 6-7: left/right (W)
+    startX: number; startY: number;
+    accumDx: number; accumDy: number;
+    origW: number; origH: number;
+  } | null>(null);
   const [enterHintNodeId, setEnterHintNodeId] = useState<string | null>(null);
   const enterHintNodeIdRef = useRef<string | null>(null);
   useEffect(() => { enterHintNodeIdRef.current = enterHintNodeId; needsRenderRef.current = true; }, [enterHintNodeId]);
@@ -571,6 +578,28 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
         return;
       }
 
+      // Bounds resize: hit-test the 8 handles on scene.bounds (4 corners + 4 edge midpoints)
+      const sceneBounds = sceneRef.current.bounds;
+      if (sceneBounds && toolRef.current === 'select') {
+        const hitR = Math.max(8, 10 / viewportRef.current.scale);
+        const hw = sceneBounds.width / 2, hh = sceneBounds.height / 2;
+        const bHandles: [number, number][] = [
+          [-hw, -hh], [hw, -hh], [-hw, hh], [hw, hh],  // 0-3 corners
+          [0, -hh], [0, hh], [-hw, 0], [hw, 0],          // 4-7 edge midpoints
+        ];
+        for (let i = 0; i < bHandles.length; i++) {
+          const [hx, hy] = bHandles[i];
+          if (Math.abs(worldX - hx) <= hitR && Math.abs(worldY - hy) <= hitR) {
+            boundsResizeRef.current = {
+              handleIdx: i, startX: hx, startY: hy,
+              accumDx: 0, accumDy: 0, origW: sceneBounds.width, origH: sceneBounds.height,
+            };
+            draggedNodeIdsRef.current = new Set();
+            return;
+          }
+        }
+      }
+
       // Check if the click lands on a resize handle of the single selected node.
       const selIds = selectedNodeIdsRef.current;
       if (selIds.size === 1) {
@@ -708,6 +737,22 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
         return;
       }
 
+      // Bounds resize drag
+      if (boundsResizeRef.current) {
+        const br = boundsResizeRef.current;
+        br.accumDx += dx; br.accumDy += dy;
+        const curX = Math.abs(br.startX + br.accumDx);
+        const curY = Math.abs(br.startY + br.accumDy);
+        const MIN = 40;
+        let newW = br.origW, newH = br.origH;
+        if (br.handleIdx <= 3) { newW = Math.max(MIN, curX * 2); newH = Math.max(MIN, curY * 2); }
+        else if (br.handleIdx <= 5) { newH = Math.max(MIN, curY * 2); }
+        else { newW = Math.max(MIN, curX * 2); }
+        setScene({ ...sceneRef.current, bounds: { width: newW, height: newH } });
+        markDirty();
+        return;
+      }
+
       // Resize mode: one of the selection handles is being dragged
       if (resizeStateRef.current) {
         const rs = resizeStateRef.current;
@@ -777,6 +822,12 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
             }
           }
         }
+        return;
+      }
+
+      if (boundsResizeRef.current) {
+        boundsResizeRef.current = null;
+        onSceneChange(sceneRef.current, viewportRef.current);
         return;
       }
 
@@ -1059,6 +1110,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
               pathEditSelectedAnchorIdx: selectedAnchorIdxRef.current,
               animationTime: Date.now(),
               startCameraPin,
+              showBoundsHandles: !viewerModeRef.current && !!sceneRef.current.bounds,
             });
 
             // Draw live stroke (and mirrored previews)
@@ -1225,14 +1277,16 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
     let hintNode: SceneNode | null = null;
 
     for (const node of currentScene.nodes) {
-      if (!node.innerScene || node.innerScene.nodes.length === 0) continue;
+      if (!node.innerScene) continue;
+      // Skip unbounded empty scenes — no fit rect can be computed, can't crossfade
+      if (node.innerScene.nodes.length === 0 && !node.innerScene.bounds) continue;
       const sw = node.width * viewport.scale;
       const sh = node.height * viewport.scale;
       const ratio = Math.min(sw / w, sh / h);
       if (ratio > enterRatio) { enterRatio = ratio; enterNode = node; }
       if (ratio > 0.2 && !enterNode) hintNode = node;
     }
-    // hint for any node (including empty)
+    // hint for any node (including empty/unbounded — user can still Z into them)
     if (!hintNode && !enterNode) {
       for (const node of currentScene.nodes) {
         if (!node.innerScene) continue;
@@ -1280,9 +1334,19 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
       const currentLevel = stack[stack.length - 1];
       const parentEntry = stack[stack.length - 2];
       const lt = currentLevel.lensTransform;
-      if (lt && zoomingOut && currentScene.nodes.length > 0) {
-        const bb = getBoundingBox(currentScene.nodes);
-        const innerRatio = Math.min(bb.width * viewport.scale / w, bb.height * viewport.scale / h);
+      if (lt && zoomingOut) {
+        let innerRatio: number;
+        if (currentScene.bounds) {
+          innerRatio = Math.min(
+            currentScene.bounds.width  * viewport.scale / w,
+            currentScene.bounds.height * viewport.scale / h,
+          );
+        } else if (currentScene.nodes.length > 0) {
+          const bb = getBoundingBox(currentScene.nodes);
+          innerRatio = Math.min(bb.width * viewport.scale / w, bb.height * viewport.scale / h);
+        } else {
+          innerRatio = 0; // empty, no bounds — crossfade immediately triggers exit
+        }
         const progress = Math.min(1, Math.max(0, (innerRatio - LENS_FADE_START) / (LENS_FADE_FULL - LENS_FADE_START)));
         // Show crossfade immediately — cooldown only gates the actual scene switch
         crossfadeRef.current = { innerScene: currentScene, outerScene: parentEntry.scene, lt, entering: false, progress };

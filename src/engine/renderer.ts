@@ -382,15 +382,26 @@ function drawSceneBoundsHandles(
     toScreen(bx, by + bh),
     toScreen(bx + bw, by + bh),
   ];
+  const edges: [number, number][] = [
+    toScreen(bx + bw / 2, by),
+    toScreen(bx + bw / 2, by + bh),
+    toScreen(bx, by + bh / 2),
+    toScreen(bx + bw, by + bh / 2),
+  ];
 
   ctx.save();
-  const r = 6;
   ctx.fillStyle = '#ffffff';
   ctx.strokeStyle = 'rgba(100, 120, 200, 0.8)';
   ctx.lineWidth = 1.5;
+  const r = 6;
   for (const [cx, cy] of corners) {
     ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
     ctx.strokeRect(cx - r, cy - r, r * 2, r * 2);
+  }
+  const re = 4;
+  for (const [ex, ey] of edges) {
+    ctx.fillRect(ex - re, ey - re, re * 2, re * 2);
+    ctx.strokeRect(ex - re, ey - re, re * 2, re * 2);
   }
   ctx.restore();
 }
