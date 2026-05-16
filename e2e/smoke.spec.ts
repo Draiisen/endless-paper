@@ -705,3 +705,199 @@ test('layer lock / visibility — locked-layer node cannot be selected', async (
   });
   expect(hasSelection).toBe(false);
 });
+
+// ── New feature tests ─────────────────────────────────────────────────────────
+
+async function getIDBStampCount(page: Page): Promise<number> {
+  return page.evaluate(async () => {
+    return new Promise<number>((resolve) => {
+      const req = indexedDB.open('endless-paper', 1);
+      req.onsuccess = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains('state')) { resolve(0); return; }
+        const tx = db.transaction('state', 'readonly');
+        const gr = tx.objectStore('state').get('autosave');
+        gr.onsuccess = () => resolve((gr.result as any)?.brushStamps?.length ?? 0);
+        gr.onerror = () => resolve(0);
+      };
+      req.onerror = () => resolve(0);
+    });
+  });
+}
+
+async function getIDBNodeIds(page: Page): Promise<string[]> {
+  return page.evaluate(async () => {
+    return new Promise<string[]>((resolve) => {
+      const req = indexedDB.open('endless-paper', 1);
+      req.onsuccess = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains('state')) { resolve([]); return; }
+        const tx = db.transaction('state', 'readonly');
+        const gr = tx.objectStore('state').get('autosave');
+        gr.onsuccess = () => resolve((gr.result as any)?.rootScene?.nodes?.map((n: any) => n.id) ?? []);
+        gr.onerror = () => resolve([]);
+      };
+      req.onerror = () => resolve([]);
+    });
+  });
+}
+
+test('stamps — brushStamps persisted to IDB and survive reload', async ({ page }) => {
+  const stateWithStamp = {
+    ...SEED_STATE,
+    brushStamps: [{
+      id: 'stamp-1',
+      name: 'test-stamp',
+      imageData: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+      spacing: 30,
+      size: 60,
+      rotationMode: 'fixed',
+      opacity: 1,
+    }],
+    savedAt: Date.now(),
+  };
+  await page.addInitScript((state) => {
+    localStorage.setItem('endless-paper-autosave', JSON.stringify(state));
+    localStorage.setItem('ep_welcomed_v1', '1');
+  }, stateWithStamp);
+
+  await page.goto('/');
+  await waitForCanvas(page);
+  await page.waitForTimeout(800); // autosave debounce
+
+  expect(await getIDBStampCount(page)).toBe(1);
+
+  // Reload — stamp must still be in IDB
+  await page.reload();
+  await waitForCanvas(page);
+  await page.waitForTimeout(300);
+
+  expect(await getIDBStampCount(page)).toBe(1);
+});
+
+test('Ctrl+A — locked-layer nodes excluded from select-all', async ({ page }) => {
+  await seedLocalStorage(page);
+  await page.goto('/');
+  await waitForCanvas(page);
+
+  await page.keyboard.press('v');
+  await page.waitForTimeout(50);
+
+  // Select all, then delete — locked-node must survive
+  await page.keyboard.press('Control+a');
+  await page.waitForTimeout(100);
+  await page.keyboard.press('Delete');
+  await page.waitForTimeout(800); // autosave
+
+  const nodeIds = await getIDBNodeIds(page);
+  expect(nodeIds).toContain('locked-node');
+  expect(nodeIds).not.toContain('hotspot-node');
+});
+
+test('marquee — locked-layer nodes excluded from rect selection', async ({ page }) => {
+  await seedLocalStorage(page);
+  await page.goto('/');
+  await waitForCanvas(page);
+
+  await page.keyboard.press('v');
+  await page.waitForTimeout(50);
+
+  // Drag marquee from world(-20,-10)→screen(620,390) to world(610,420)→screen(1250,820)
+  // This covers hotspot-node, portal-node, inner-node AND locked-node in world space.
+  await page.mouse.move(620, 390);
+  await page.mouse.down();
+  await page.mouse.move(1250, 820);
+  await page.mouse.up();
+  await page.waitForTimeout(100);
+
+  // Delete what was selected
+  await page.keyboard.press('Delete');
+  await page.waitForTimeout(800); // autosave
+
+  // locked-node must survive; at least one non-locked node should be gone
+  const nodeIds = await getIDBNodeIds(page);
+  expect(nodeIds).toContain('locked-node');
+  expect(nodeIds).not.toContain('hotspot-node');
+});
+
+test('camera bookmark — scenePath navigates into nested scene', async ({ page }) => {
+  const stateWithCamera = {
+    ...SEED_STATE,
+    rootScene: {
+      ...SEED_STATE.rootScene,
+      cameras: [{
+        id: 'cam-inner',
+        name: 'Inner Scene View',
+        viewport: { x: 300, y: 300, scale: 1 },
+        scenePath: ['inner-node'],
+        duration: 2000,
+        transitionMs: 0,
+      }],
+    },
+    savedAt: Date.now(),
+  };
+  await page.addInitScript((state) => {
+    localStorage.setItem('endless-paper-autosave', JSON.stringify(state));
+    localStorage.setItem('ep_welcomed_v1', '1');
+  }, stateWithCamera);
+
+  await page.goto('/');
+  await waitForCanvas(page);
+
+  // Open camera bookmarks dropdown (desktop toolbar)
+  await page.locator('button', { hasText: '📍' }).first().click();
+  await page.waitForTimeout(150);
+
+  // Click the bookmark
+  await page.getByText('Inner Scene View').click();
+  await page.waitForTimeout(500);
+
+  // Navigating into inner-node should reveal the back button
+  await page.waitForSelector('button[title="Escape"]', { timeout: 3000 });
+  const escapeBtn = page.locator('button[title="Escape"]');
+  await expect(escapeBtn).toBeVisible();
+});
+
+test('mobile StampPanel — full-width on mobile viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await seedLocalStorage(page);
+  await page.goto('/');
+  await waitForCanvas(page);
+
+  // Activate stamp tool via keyboard shortcut
+  await page.keyboard.press('s');
+  await page.waitForTimeout(200);
+
+  // StampPanel should be visible and span the full width
+  const panel = page.locator('[class*="fixed right-0 top-12 bottom-0"]').first();
+  await expect(panel).toBeVisible({ timeout: 3000 });
+  const box = await panel.boundingBox();
+  expect(box).not.toBeNull();
+  // Full-width means it fills ~390px (allow ±2px for border/rounding)
+  expect(box!.width).toBeGreaterThan(380);
+});
+
+test('mobile menu — Bibliothèque button opens asset library', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await seedLocalStorage(page);
+  await page.goto('/');
+  await waitForCanvas(page);
+
+  // Open the mobile overflow menu
+  await page.click('button[title="More"]');
+  await page.waitForTimeout(200);
+
+  // Bibliothèque button must be visible in the menu
+  const libButton = page.getByText('Bibliothèque');
+  await expect(libButton).toBeVisible({ timeout: 3000 });
+
+  // Clicking it should open the library panel and close the menu
+  await libButton.click();
+  await page.waitForTimeout(300);
+
+  // Mobile menu should be dismissed
+  await expect(page.locator('[data-testid="mobile-world-size-button"]')).not.toBeVisible();
+
+  // Library panel header should be visible
+  await expect(page.getByText('Library', { exact: true })).toBeVisible({ timeout: 3000 });
+});

@@ -496,38 +496,33 @@ export default function App({ initialState, settings }: AppProps) {
     scheduleAutoSave();
   }, [getRootScene, setScene, handleSceneChange, setSceneStack, scheduleAutoSave]);
 
-  const handleResetToStart = useCallback(() => {
+  const navigateToScenePath = useCallback((scenePath: string[], targetViewport: Viewport) => {
     const root = getRootScene();
-    if (!root.startCamera) return;
-    const { viewport: sv, scenePath } = root.startCamera;
     setSelectedNodeIds(new Set());
-
     if (!scenePath || scenePath.length === 0) {
       setScene(root);
-      setViewport(sv);
-      setSceneStack(createInitialSceneStack(root, sv));
+      setViewport(targetViewport);
+      setSceneStack(createInitialSceneStack(root, targetViewport));
       return;
     }
-
-    // Build scene stack by following parentNodeId path from root
-    const newStack: SceneLevel[] = [{ scene: root, parentNodeId: '', label: 'World', viewportWhenLeft: sv }];
+    const newStack: SceneLevel[] = [{ scene: root, parentNodeId: '', label: 'World', viewportWhenLeft: targetViewport }];
     let current = root;
     for (const nodeId of scenePath) {
       const node = current.nodes.find(n => n.id === nodeId);
       if (!node?.innerScene) break;
-      newStack.push({
-        scene: node.innerScene,
-        parentNodeId: nodeId,
-        label: node.text ?? node.type,
-        viewportWhenLeft: sv,
-      });
+      newStack.push({ scene: node.innerScene, parentNodeId: nodeId, label: node.text ?? node.type, viewportWhenLeft: targetViewport });
       current = node.innerScene;
     }
-    const targetScene = newStack[newStack.length - 1].scene;
     setSceneStack(newStack);
-    setScene(targetScene);
-    setViewport(sv);
+    setScene(newStack[newStack.length - 1].scene);
+    setViewport(targetViewport);
   }, [getRootScene, setScene, setSceneStack]);
+
+  const handleResetToStart = useCallback(() => {
+    const root = getRootScene();
+    if (!root.startCamera) return;
+    navigateToScenePath(root.startCamera.scenePath ?? [], root.startCamera.viewport);
+  }, [getRootScene, navigateToScenePath]);
 
   // Update selected node properties (single selection)
   const handleUpdateSelectedNode = useCallback((updates: Partial<import('./types/scene').SceneNode>) => {
@@ -540,7 +535,15 @@ export default function App({ initialState, settings }: AppProps) {
 
   const handleDeleteSelected = useCallback(() => {
     if (selectedNodeIds.size === 0) return;
-    const newScene = { ...sceneRef.current, nodes: sceneRef.current.nodes.filter(n => !selectedNodeIds.has(n.id)) };
+    const layers = sceneRef.current.layers;
+    const newScene = { ...sceneRef.current, nodes: sceneRef.current.nodes.filter(n => {
+      if (!selectedNodeIds.has(n.id)) return true;
+      if (layers && n.layerId) {
+        const lay = layers.find(l => l.id === n.layerId);
+        if (lay?.locked) return true;
+      }
+      return false;
+    }) };
     setScene(newScene);
     handleSceneChange(newScene, viewportRef.current);
     setSelectedNodeIds(new Set());
@@ -687,6 +690,15 @@ export default function App({ initialState, settings }: AppProps) {
     scheduleAutoSave();
   }, [setScene, setSceneStack, history, scheduleAutoSave, cancelAllLod]);
 
+  const makeCurrentState = useCallback((): PersistedState => ({
+    version: 1,
+    rootScene: getRootScene(),
+    viewport: viewportRef.current,
+    savedAt: Date.now(),
+    assets: assetsRef.current,
+    brushStamps: stampsRef.current,
+  }), [getRootScene]);
+
   const handleNew = useCallback(() => {
     if (!confirm('Start a new canvas? Unsaved changes will be lost.')) return;
     cancelAllLod();
@@ -817,20 +829,29 @@ export default function App({ initialState, settings }: AppProps) {
         rotationMode: 'fixed',
         opacity: 1,
       };
-      setStamps(prev => [...prev, stamp]);
+      const newStamps = [...stampsRef.current, stamp];
+      stampsRef.current = newStamps;
+      setStamps(newStamps);
       setActiveStampId(stamp.id);
+      scheduleAutoSave();
     };
     reader.readAsDataURL(file);
-  }, []);
+  }, [scheduleAutoSave]);
 
   const handleDeleteStamp = useCallback((id: string) => {
-    setStamps(prev => prev.filter(s => s.id !== id));
+    const newStamps = stampsRef.current.filter(s => s.id !== id);
+    stampsRef.current = newStamps;
+    setStamps(newStamps);
     setActiveStampId(prev => prev === id ? null : prev);
-  }, []);
+    scheduleAutoSave();
+  }, [scheduleAutoSave]);
 
   const handleUpdateStamp = useCallback((id: string, changes: Partial<import('./types/scene').BrushStamp>) => {
-    setStamps(prev => prev.map(s => s.id === id ? { ...s, ...changes } : s));
-  }, []);
+    const newStamps = stampsRef.current.map(s => s.id === id ? { ...s, ...changes } : s);
+    stampsRef.current = newStamps;
+    setStamps(newStamps);
+    scheduleAutoSave();
+  }, [scheduleAutoSave]);
 
   const loadTemplate = useCallback((name: TemplateName) => {
     const cx = (window.innerWidth / 2 - viewport.x) / viewport.scale;
@@ -875,12 +896,13 @@ export default function App({ initialState, settings }: AppProps) {
         return;
       }
       const cam = cameras[i++];
+      navigateToScenePath(cam.scenePath ?? [], cam.viewport);
       canvasHandleRef.current?.animateViewportTo(cam.viewport, () => {
         if (!stopped) setTimeout(playNext, cam.duration);
       }, cam.transitionMs ?? 600);
     };
     playNext();
-  }, [scene.cameras]);
+  }, [scene.cameras, navigateToScenePath]);
 
   const handleAddCamera = useCallback(() => {
     const stack = sceneStackRef.current;
@@ -996,7 +1018,15 @@ export default function App({ initialState, settings }: AppProps) {
       }
       if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
         e.preventDefault();
-        setSelectedNodeIds(new Set(sceneRef.current.nodes.map(n => n.id)));
+        const layers = sceneRef.current.layers;
+        const ids = sceneRef.current.nodes
+          .filter(n => {
+            if (!layers || !n.layerId) return true;
+            const lay = layers.find(l => l.id === n.layerId);
+            return !lay || (!lay.locked && lay.visible);
+          })
+          .map(n => n.id);
+        setSelectedNodeIds(new Set(ids));
         return;
       }
       if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
@@ -1287,7 +1317,7 @@ export default function App({ initialState, settings }: AppProps) {
                       {scene.cameras!.map(cam => (
                         <button
                           key={cam.id}
-                          onClick={() => { setViewport(cam.viewport); viewportRef.current = cam.viewport; setShowBookmarks(false); }}
+                          onClick={() => { navigateToScenePath(cam.scenePath ?? [], cam.viewport); setShowBookmarks(false); }}
                           className="w-full text-left px-3 py-2 text-xs text-gray-300 hover:text-white hover:bg-white/10 transition-colors"
                         >{cam.name}</button>
                       ))}
@@ -1338,9 +1368,9 @@ export default function App({ initialState, settings }: AppProps) {
             </div>
 
             {/* Status */}
-            {lodProcessingCount > 0 && <span className="text-[11px] text-gray-400 animate-pulse">⚙ Vectorizing…</span>}
-            {autoSaveFailed && <span className="text-[11px] text-red-400">⚠ Auto-save failed — use Save</span>}
-            {projectSizeMB > 5 && <span className={`text-[11px] ${projectSizeMB > 15 ? 'text-orange-400' : 'text-yellow-400/80'}`}>Size: {projectSizeMB.toFixed(1)} MB</span>}
+            {lodProcessingCount > 0 && <span className="text-[11px] text-gray-400 animate-pulse">⚙ Vectorisation…</span>}
+            {autoSaveFailed && <span className="text-[11px] text-red-400">⚠ Échec de la sauvegarde auto</span>}
+            {projectSizeMB > 5 && <span className={`text-[11px] ${projectSizeMB > 15 ? 'text-orange-400' : 'text-yellow-400/80'}`}>Taille : {projectSizeMB.toFixed(1)} Mo</span>}
 
             <div className="h-px bg-white/10" />
 
@@ -1348,19 +1378,19 @@ export default function App({ initialState, settings }: AppProps) {
             {singleSelection && (
               <button onClick={() => { setShowProperties(v => !v); setShowMobileMenu(false); }}
                 className={`flex items-center gap-3 px-3 py-3 rounded-lg text-sm touch-manipulation ${showProperties ? 'bg-accent/20 text-accent' : 'text-gray-200 active:bg-white/10'}`}>
-                <span>⚙</span><span>Properties</span>
+                <span>⚙</span><span>Propriétés</span>
               </button>
             )}
 
             {/* Mode & audio */}
             <button onClick={() => { setViewerMode(v => !v); setShowMobileMenu(false); }}
               className={`flex items-center gap-3 px-3 py-3 rounded-lg text-sm touch-manipulation ${viewerMode ? 'bg-accent/20 text-accent' : 'text-gray-200 active:bg-white/10'}`}>
-              <span>{viewerMode ? '▶' : '✎'}</span><span>{viewerMode ? 'Viewer mode ON' : 'Edit mode'}</span>
+              <span>{viewerMode ? '▶' : '✎'}</span><span>{viewerMode ? 'Mode Viewer actif' : 'Mode Édition'}</span>
             </button>
 
             <button onClick={() => setAudioMuted(m => !m)}
               className="flex items-center gap-3 px-3 py-3 rounded-lg text-sm text-gray-200 active:bg-white/10 touch-manipulation">
-              <span>{audioMuted ? '🔇' : '🔊'}</span><span>{audioMuted ? 'Unmute' : 'Mute audio'}</span>
+              <span>{audioMuted ? '🔇' : '🔊'}</span><span>{audioMuted ? 'Activer le son' : 'Couper le son'}</span>
             </button>
 
             <div className="h-px bg-white/10" />
@@ -1384,13 +1414,18 @@ export default function App({ initialState, settings }: AppProps) {
               <span>Tampon</span>
             </button>
 
+            <button onClick={() => { setShowLibrary(v => !v); setShowMobileMenu(false); }}
+              className={`flex items-center gap-3 px-3 py-3 rounded-lg text-sm touch-manipulation ${showLibrary ? 'bg-accent/20 text-accent' : 'text-gray-200 active:bg-white/10'}`}>
+              <span>🖼</span><span>Bibliothèque</span>
+            </button>
+
             {/* Symétrie rapide */}
-            <div className="flex items-center justify-between px-3 py-2">
+            <div className="flex flex-col gap-1 px-3 py-2">
               <span className="text-gray-400 text-xs">Symétrie</span>
-              <div className="flex gap-1">
-                {([['off','—'],['vertical','↔'],['horizontal','↕'],['both','✛']] as const).map(([m, label]) => (
+              <div className="flex gap-1 flex-wrap">
+                {([['off','—'],['vertical','↔'],['horizontal','↕'],['both','✛'],['radial4','✦4'],['radial6','✦6'],['radial8','✦8']] as const).map(([m, label]) => (
                   <button key={m} onClick={() => setSymmetry(m)}
-                    className={`w-9 h-7 text-[11px] rounded touch-manipulation transition-colors ${symmetry === m ? 'bg-accent text-white' : 'bg-white/10 text-gray-400 active:text-white'}`}>
+                    className={`flex-1 min-w-[2rem] h-7 text-[11px] rounded touch-manipulation transition-colors ${symmetry === m ? 'bg-accent text-white' : 'bg-white/10 text-gray-400 active:text-white'}`}>
                     {label}
                   </button>
                 ))}
@@ -1418,12 +1453,12 @@ export default function App({ initialState, settings }: AppProps) {
             {/* Camera */}
             <button onClick={() => { handleSetStartCamera(); setShowMobileMenu(false); }}
               className="flex items-center gap-3 px-3 py-3 rounded-lg text-sm text-gray-200 active:bg-white/10 touch-manipulation">
-              <span>🎯</span><span>Set start point</span>
+              <span>🎯</span><span>Définir le point de départ</span>
             </button>
             {getRootScene().startCamera && (
               <button onClick={() => { handleResetToStart(); setShowMobileMenu(false); }}
                 className="flex items-center gap-3 px-3 py-3 rounded-lg text-sm text-gray-200 active:bg-white/10 touch-manipulation">
-                <span>⟳</span><span>Reset to start</span>
+                <span>⟳</span><span>Revenir au départ</span>
               </button>
             )}
 
@@ -1661,7 +1696,7 @@ export default function App({ initialState, settings }: AppProps) {
 
       {showExport && (
         <ExportModal
-          state={{ version: 1, rootScene: rootSceneRef.current, viewport: viewportRef.current, savedAt: Date.now(), assets: assetsRef.current }}
+          state={makeCurrentState()}
           sceneStack={sceneStack}
           onClose={() => setShowExport(false)}
         />
@@ -1669,7 +1704,7 @@ export default function App({ initialState, settings }: AppProps) {
 
       {showSaves && (
         <SavesModal
-          currentState={{ version: 1, rootScene: rootSceneRef.current, viewport: viewportRef.current, savedAt: Date.now(), assets: assetsRef.current }}
+          currentState={makeCurrentState()}
           onClose={() => setShowSaves(false)}
           onRestore={handleRestoreFromSave}
         />

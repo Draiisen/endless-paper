@@ -173,17 +173,19 @@ function hitTest(node: SceneNode, worldX: number, worldY: number): boolean {
 export function getNodesInRect(
   scene: Scene,
   x: number, y: number, w: number, h: number,
+  ignoreLocked = true,
 ): SceneNode[] {
   const minX = Math.min(x, x + w);
   const maxX = Math.max(x, x + w);
   const minY = Math.min(y, y + h);
   const maxY = Math.max(y, y + h);
-  return scene.nodes.filter(n => (
-    n.x + n.width >= minX &&
-    n.x <= maxX &&
-    n.y + n.height >= minY &&
-    n.y <= maxY
-  ));
+  return scene.nodes.filter(n => {
+    if (ignoreLocked && scene.layers && n.layerId) {
+      const lay = scene.layers.find(l => l.id === n.layerId);
+      if (lay && (lay.locked || !lay.visible)) return false;
+    }
+    return n.x + n.width >= minX && n.x <= maxX && n.y + n.height >= minY && n.y <= maxY;
+  });
 }
 
 export function getGroupSiblings(scene: Scene, nodeId: string): SceneNode[] {

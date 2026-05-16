@@ -16,7 +16,7 @@ export function StampPanel({ stamps, activeStampId, onSelectStamp, onAddStamp, o
   const active = stamps.find(s => s.id === activeStampId) ?? null;
 
   return (
-    <div className="fixed right-0 top-12 bottom-0 w-56 bg-ink border-l border-white/10 z-20 flex flex-col shadow-2xl">
+    <div className="fixed right-0 top-12 bottom-0 w-full sm:w-56 bg-ink border-l border-white/10 z-20 flex flex-col shadow-2xl">
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-white/10 flex-shrink-0">
         <span className="text-white text-sm font-semibold">Tampons</span>
