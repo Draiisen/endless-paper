@@ -66,10 +66,38 @@ export function ColorPicker({ value, onChange, swatchClassName, title, showFillT
   const [open, setOpen] = useState(false);
   const [recent, setRecent] = useState<string[]>(loadRecent);
   const wrapRef = useRef<HTMLDivElement>(null);
-  const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({ left: '3rem', top: 0 });
+  const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({});
 
   const isNone = value === 'none' || !value;
   const parsed = isNone ? { hex: '#1a1a2e', alpha: 1 } : parseColor(value);
+
+  // Compute a fixed-position style from the trigger button's screen rect
+  function computePanelStyle(): React.CSSProperties {
+    const rect = wrapRef.current?.getBoundingClientRect();
+    if (!rect) return {};
+    const panelH = 300;
+    const panelW = 224;
+    const margin = 6;
+    const style: React.CSSProperties = { position: 'fixed' };
+    // Horizontal: open to the right of trigger, flip left if no room
+    if (rect.right + panelW + margin <= window.innerWidth) {
+      style.left = rect.right + margin;
+    } else {
+      style.right = window.innerWidth - rect.left + margin;
+    }
+    // Vertical: open below trigger, flip above if no room
+    if (rect.bottom + panelH + margin <= window.innerHeight) {
+      style.top = rect.bottom + margin;
+    } else {
+      style.bottom = window.innerHeight - rect.top + margin;
+    }
+    return style;
+  }
+
+  const handleToggle = () => {
+    if (!open) setPanelStyle(computePanelStyle());
+    setOpen(o => !o);
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -81,31 +109,6 @@ export function ColorPicker({ value, onChange, swatchClassName, title, showFillT
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
     window.addEventListener('pointerdown', onClick);
     window.addEventListener('keydown', onKey);
-
-    // Compute smart panel position to stay within viewport
-    if (wrapRef.current) {
-      const rect = wrapRef.current.getBoundingClientRect();
-      const panelH = 300;
-      const panelW = 224;
-      const style: React.CSSProperties = {};
-      // Horizontal: prefer opening right, flip left if no room
-      if (rect.right + panelW + 4 > window.innerWidth) {
-        style.right = 0;
-        style.left = 'auto';
-      } else {
-        style.left = '100%';
-        style.marginLeft = '8px';
-      }
-      // Vertical: prefer top-aligned, flip up if no room below
-      if (rect.bottom + panelH > window.innerHeight) {
-        style.bottom = 0;
-        style.top = 'auto';
-      } else {
-        style.top = 0;
-      }
-      setPanelStyle(style);
-    }
-
     return () => {
       window.removeEventListener('pointerdown', onClick);
       window.removeEventListener('keydown', onKey);
@@ -131,10 +134,10 @@ export function ColorPicker({ value, onChange, swatchClassName, title, showFillT
           backgroundSize: '8px 8px',
           backgroundPosition: '0 0, 0 4px, 4px -4px, -4px 0px',
         }}
-        onClick={() => setOpen(o => !o)}
+        onClick={handleToggle}
       />
       {open && (
-        <div className="absolute z-50 bg-ink/95 backdrop-blur-sm rounded-xl shadow-2xl border border-white/10 p-3 w-56" style={panelStyle}>
+        <div className="z-50 bg-ink/95 backdrop-blur-sm rounded-xl shadow-2xl border border-white/10 p-3 w-56" style={panelStyle}>
           {recent.length > 0 && (
             <>
               <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">Recent</div>

@@ -1314,6 +1314,61 @@ export default function App({ initialState, settings }: AppProps) {
 
             <div className="h-px bg-white/10" />
 
+            {/* Panneaux */}
+            <button onClick={() => { setShowLayers(v => !v); setShowMobileMenu(false); }}
+              className={`flex items-center gap-3 px-3 py-3 rounded-lg text-sm touch-manipulation ${showLayers ? 'bg-accent/20 text-accent' : 'text-gray-200 active:bg-white/10'}`}>
+              <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current flex-shrink-0"><path d="M11.99 18.54l-7.37-5.73L3 14.07l9 7 9-7-1.63-1.27-7.38 5.74zM12 16l7.36-5.73L21 9l-9-7-9 7 1.63 1.27L12 16z"/></svg>
+              <span>Calques</span>
+            </button>
+
+            <button onClick={() => { setShowMiniMap(v => !v); setShowMobileMenu(false); }}
+              className={`flex items-center gap-3 px-3 py-3 rounded-lg text-sm touch-manipulation ${showMiniMap ? 'bg-accent/20 text-accent' : 'text-gray-200 active:bg-white/10'}`}>
+              <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current flex-shrink-0"><path d="M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5z"/></svg>
+              <span>Mini-carte</span>
+            </button>
+
+            <button onClick={() => { setTool('stamp'); setShowMobileMenu(false); }}
+              className={`flex items-center gap-3 px-3 py-3 rounded-lg text-sm touch-manipulation ${tool === 'stamp' ? 'bg-accent/20 text-accent' : 'text-gray-200 active:bg-white/10'}`}>
+              <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current flex-shrink-0"><path d="M7 14c-1.66 0-3 1.34-3 3 0 1.31-1.16 2-2 2 .92 1.22 2.49 2 4 2 2.21 0 4-1.79 4-4 0-1.66-1.34-3-3-3zm13.71-9.37l-1.34-1.34c-.39-.39-1.02-.39-1.41 0L9 12.25 11.75 15l8.96-8.96c.39-.39.39-1.02 0-1.41z"/></svg>
+              <span>Tampon</span>
+            </button>
+
+            {/* Symétrie rapide */}
+            <div className="flex items-center justify-between px-3 py-2">
+              <span className="text-gray-400 text-xs">Symétrie</span>
+              <div className="flex gap-1">
+                {([['off','—'],['vertical','↔'],['horizontal','↕'],['both','✛']] as const).map(([m, label]) => (
+                  <button key={m} onClick={() => setSymmetry(m)}
+                    className={`w-9 h-7 text-[11px] rounded touch-manipulation transition-colors ${symmetry === m ? 'bg-accent text-white' : 'bg-white/10 text-gray-400 active:text-white'}`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Taille du monde */}
+            <div className="flex flex-col gap-1 px-3 py-2">
+              <span className="text-gray-400 text-xs">Délimitation</span>
+              <div className="flex gap-1 flex-wrap">
+                {([
+                  { label: '∞', bounds: null },
+                  { label: '16:9', bounds: { width: 1920, height: 1080 } },
+                  { label: 'A4↕', bounds: { width: 2480, height: 3508 } },
+                  { label: 'A4↔', bounds: { width: 3508, height: 2480 } },
+                ] as const).map(p => {
+                  const active = p.bounds === null ? !scene.bounds : (scene.bounds?.width === p.bounds.width && scene.bounds?.height === p.bounds.height);
+                  return (
+                    <button key={p.label} onClick={() => handleSetSceneBounds(p.bounds)}
+                      className={`px-2.5 py-1 text-xs rounded touch-manipulation transition-colors ${active ? 'bg-accent text-white' : 'bg-white/10 text-gray-300 active:text-white'}`}>
+                      {p.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="h-px bg-white/10" />
+
             {/* Camera */}
             <button onClick={() => { handleSetStartCamera(); setShowMobileMenu(false); }}
               className="flex items-center gap-3 px-3 py-3 rounded-lg text-sm text-gray-200 active:bg-white/10 touch-manipulation">

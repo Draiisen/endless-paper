@@ -55,7 +55,7 @@ const SEED_STATE = {
         innerScene: {
           id: 'inner-scene-1',
           background: '#e0f0ff',
-          nodes: [{ id: 'child-rect', type: 'rect', x: 100, y: 100, width: 100, height: 100, fill: '#9b59b6', stroke: 'none', strokeWidth: 0 }],
+          nodes: [],  // empty so computeLensTransform returns null → fallback viewport
         },
       },
       {
