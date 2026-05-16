@@ -114,6 +114,8 @@ interface CanvasProps {
   onHotspotClick?: (node: SceneNode, viewport: Viewport) => boolean;
   onDropAsset?: (assetId: string, worldX: number, worldY: number) => void;
   onDropImageFile?: (file: File, worldX: number, worldY: number) => void;
+  stamps?: import('../types/scene').BrushStamp[];
+  activeStampId?: string | null;
 }
 
 interface TextEditState {
@@ -144,6 +146,8 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   onHotspotClick,
   onDropAsset,
   onDropImageFile,
+  stamps = [],
+  activeStampId = null,
 }, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number>(0);
@@ -213,6 +217,30 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   } | null>(null);
   const offscreenC1 = useRef<HTMLCanvasElement | null>(null);
   const offscreenC2 = useRef<HTMLCanvasElement | null>(null);
+
+  // Stamp tool state
+  interface StampPlacement { x: number; y: number; angle: number; }
+  const stampStrokeRef = useRef<{
+    stamp: import('../types/scene').BrushStamp;
+    img: HTMLImageElement;
+    placements: StampPlacement[];
+    lastX: number; lastY: number; lastAngle: number;
+  } | null>(null);
+  const stampImgCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
+  const stampsRef = useRef(stamps);
+  const activeStampIdRef = useRef(activeStampId);
+  useEffect(() => { stampsRef.current = stamps; }, [stamps]);
+  useEffect(() => { activeStampIdRef.current = activeStampId; }, [activeStampId]);
+
+  // Pre-load stamp images when stamps list changes
+  useEffect(() => {
+    for (const stamp of stamps) {
+      if (stampImgCacheRef.current.get(stamp.id)?.complete) continue;
+      const img = new Image();
+      img.onload = () => { stampImgCacheRef.current.set(stamp.id, img); needsRenderRef.current = true; };
+      img.src = stamp.imageData;
+    }
+  }, [stamps]);
 
   useEffect(() => { sceneRef.current = scene; needsRenderRef.current = true; }, [scene]);
   useEffect(() => {
@@ -837,6 +865,67 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
       textCommittedRef.current = false;
       setTextEdit({ screenX: sx, screenY: sy, worldX: wx, worldY: wy, value: '', fontSize: 18 });
     }, []),
+
+    onStampStart: useCallback((wx: number, wy: number) => {
+      const stamp = stampsRef.current.find(s => s.id === activeStampIdRef.current);
+      if (!stamp) return;
+      const img = stampImgCacheRef.current.get(stamp.id);
+      if (!img?.complete) return;
+      stampStrokeRef.current = { stamp, img, placements: [{ x: wx, y: wy, angle: 0 }], lastX: wx, lastY: wy, lastAngle: 0 };
+      needsRenderRef.current = true;
+    }, []),
+
+    onStampMove: useCallback((wx: number, wy: number) => {
+      const ss = stampStrokeRef.current;
+      if (!ss) return;
+      const dx = wx - ss.lastX;
+      const dy = wy - ss.lastY;
+      const dist = Math.hypot(dx, dy);
+      const spacing = Math.max(1, ss.stamp.size * ss.stamp.spacing / 100);
+      if (dist >= spacing) {
+        let angle = ss.lastAngle;
+        if (ss.stamp.rotationMode === 'follow') angle = Math.atan2(dy, dx);
+        else if (ss.stamp.rotationMode === 'random') angle = Math.random() * Math.PI * 2;
+        ss.placements.push({ x: wx, y: wy, angle });
+        ss.lastX = wx; ss.lastY = wy; ss.lastAngle = angle;
+        needsRenderRef.current = true;
+      }
+    }, []),
+
+    onStampEnd: useCallback(() => {
+      const ss = stampStrokeRef.current;
+      if (!ss || ss.placements.length === 0) { stampStrokeRef.current = null; return; }
+      const { stamp, img, placements } = ss;
+      const half = stamp.size / 2;
+      const minX = Math.min(...placements.map(p => p.x)) - half;
+      const maxX = Math.max(...placements.map(p => p.x)) + half;
+      const minY = Math.min(...placements.map(p => p.y)) - half;
+      const maxY = Math.max(...placements.map(p => p.y)) + half;
+      const bw = maxX - minX, bh = maxY - minY;
+      if (bw < 1 || bh < 1) { stampStrokeRef.current = null; return; }
+      const sc = Math.min(2, 1200 / Math.max(bw, bh));
+      const offscreen = document.createElement('canvas');
+      offscreen.width = Math.ceil(bw * sc); offscreen.height = Math.ceil(bh * sc);
+      const octx = offscreen.getContext('2d');
+      if (octx) {
+        for (const p of placements) {
+          const cx = (p.x - minX) * sc, cy = (p.y - minY) * sc, sz = stamp.size * sc;
+          octx.save();
+          octx.globalAlpha = stamp.opacity;
+          octx.translate(cx, cy); octx.rotate(p.angle);
+          octx.drawImage(img, -sz / 2, -sz / 2, sz, sz);
+          octx.restore();
+        }
+      }
+      const node = createNode('image', minX, minY, bw, bh);
+      node.imageData = offscreen.toDataURL('image/png');
+      if (activeLayerIdRef.current) node.layerId = activeLayerIdRef.current;
+      const newScene = addNode(sceneRef.current, node);
+      setScene(newScene);
+      onSceneChange(newScene, viewportRef.current);
+      stampStrokeRef.current = null;
+      markDirty();
+    }, [setScene, onSceneChange, markDirty]),
   };
 
   const gesturesApiRef = useRef<ReturnType<typeof useGestures> | null>(null);
@@ -867,12 +956,13 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
       const ms = getMarqueeStart();
       const me = getMarqueeEnd();
       const liveShapeActive = !!(ss && se && (toolRef.current === 'rect' || toolRef.current === 'circle'));
+      const stampActive = !!stampStrokeRef.current;
 
       const hasAnimatedNodes = sceneRef.current.nodes.some(n => n.animation);
       const now = Date.now();
       const hasVectorFading = sceneRef.current.nodes.some(n => n.lod?.vectorLoadedAt && (now - n.lod.vectorLoadedAt) < 650);
       const cf = crossfadeRef.current;
-      if (needsRenderRef.current || liveStrokeActive || liveShapeActive || (ms && me) || hasAnimatedNodes || hasVectorFading || !!cf) {
+      if (needsRenderRef.current || liveStrokeActive || liveShapeActive || stampActive || (ms && me) || hasAnimatedNodes || hasVectorFading || !!cf) {
         const ctx = canvas.getContext('2d');
         if (ctx) {
           const symmMode = symmetryRef.current;
@@ -990,6 +1080,22 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
                 toolRef.current as 'rect' | 'circle',
                 strokeColorRef.current, fillColorRef.current, strokeWidthRef.current,
                 viewportRef.current);
+            }
+
+            // Live stamp preview
+            const stampStroke = stampStrokeRef.current;
+            if (stampStroke) {
+              const vp = viewportRef.current;
+              for (const p of stampStroke.placements) {
+                const sx = p.x * vp.scale + vp.x;
+                const sy = p.y * vp.scale + vp.y;
+                const sz = stampStroke.stamp.size * vp.scale;
+                ctx.save();
+                ctx.globalAlpha = stampStroke.stamp.opacity;
+                ctx.translate(sx, sy); ctx.rotate(p.angle);
+                ctx.drawImage(stampStroke.img, -sz / 2, -sz / 2, sz, sz);
+                ctx.restore();
+              }
             }
 
             // Portal flash overlay
@@ -1409,6 +1515,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
       case 'eraser': return 'cell';
       case 'select': return 'default';
       case 'text': return 'text';
+      case 'stamp': return 'crosshair';
       case 'pathedit': return 'crosshair';
       default: return 'crosshair';
     }

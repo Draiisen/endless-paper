@@ -17,6 +17,7 @@ import { generateThumbnail, requestColorVectorization } from './engine/lod-manag
 import { audioManager } from './engine/audio-manager';
 import { WelcomeModal } from './components/WelcomeModal';
 import { HelpPanel } from './components/HelpPanel';
+import { StampPanel } from './components/StampPanel';
 import { createTemplate, TemplateName } from './engine/templates';
 import { ColorPicker } from './components/ColorPicker';
 
@@ -91,6 +92,8 @@ export default function App({ initialState, settings }: AppProps) {
   const [showImageHint, setShowImageHint] = useState(false);
   const [showBookmarks, setShowBookmarks] = useState(false);
   const [showFirstRunHint, setShowFirstRunHint] = useState(false);
+  const [stamps, setStamps] = useState<import('./types/scene').BrushStamp[]>(initialState?.brushStamps ?? []);
+  const [activeStampId, setActiveStampId] = useState<string | null>(null);
 
   const { popup, handleNodeClick, dismiss: dismissPopup } = useHotspotHandler(viewerMode);
 
@@ -98,6 +101,8 @@ export default function App({ initialState, settings }: AppProps) {
   const autoSaveTimerRef = useRef<number | null>(null);
   const imageHintTimerRef = useRef<number | null>(null);
   const firstRunHintTimerRef = useRef<number | null>(null);
+  const stampsRef = useRef(stamps);
+  useEffect(() => { stampsRef.current = stamps; }, [stamps]);
   const tourStopRef = useRef<(() => void) | null>(null);
   const tourPlayingRef = useRef(false);
   const canvasHandleRef = useRef<CanvasHandle | null>(null);
@@ -196,6 +201,7 @@ export default function App({ initialState, settings }: AppProps) {
         viewport: viewportRef.current,
         savedAt: Date.now(),
         assets: assetsRef.current,
+        brushStamps: stampsRef.current,
       };
       // Measure serialized size for the warning badge (one stringify, debounced)
       const approxBytes = JSON.stringify(state).length;
@@ -790,6 +796,34 @@ export default function App({ initialState, settings }: AppProps) {
     setTool('select');
   }, [activeLayerId, setScene, handleSceneChange, applyLodResult]);
 
+  const handleAddStamp = useCallback((file: File) => {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result as string;
+      const stamp: import('./types/scene').BrushStamp = {
+        id: generateId(),
+        name: file.name.replace(/\.[^.]+$/, ''),
+        imageData: dataUrl,
+        spacing: 30,
+        size: 60,
+        rotationMode: 'fixed',
+        opacity: 1,
+      };
+      setStamps(prev => [...prev, stamp]);
+      setActiveStampId(stamp.id);
+    };
+    reader.readAsDataURL(file);
+  }, []);
+
+  const handleDeleteStamp = useCallback((id: string) => {
+    setStamps(prev => prev.filter(s => s.id !== id));
+    setActiveStampId(prev => prev === id ? null : prev);
+  }, []);
+
+  const handleUpdateStamp = useCallback((id: string, changes: Partial<import('./types/scene').BrushStamp>) => {
+    setStamps(prev => prev.map(s => s.id === id ? { ...s, ...changes } : s));
+  }, []);
+
   const loadTemplate = useCallback((name: TemplateName) => {
     const cx = (window.innerWidth / 2 - viewport.x) / viewport.scale;
     const cy = (window.innerHeight / 2 - viewport.y) / viewport.scale;
@@ -977,6 +1011,7 @@ export default function App({ initialState, settings }: AppProps) {
           case 'z': canvasHandleRef.current?.enterSelected(); break;
           case 'm': setShowMiniMap(v => !v); break;
           case 'f': handleFitAll(); break;
+          case 's': setTool('stamp'); break;
         }
       }
     };
@@ -1043,6 +1078,8 @@ export default function App({ initialState, settings }: AppProps) {
         onHotspotClick={handleNodeClick}
         onDropAsset={handleDropAsset}
         onDropImageFile={handleDropImageFile}
+        stamps={stamps}
+        activeStampId={activeStampId}
       />
 
       <Toolbar
@@ -1377,6 +1414,18 @@ export default function App({ initialState, settings }: AppProps) {
           currentSceneAudio={scene.audio}
           onUpdateSceneAudio={handleUpdateSceneAudio}
           onClose={() => setShowProperties(false)}
+        />
+      )}
+
+      {tool === 'stamp' && (
+        <StampPanel
+          stamps={stamps}
+          activeStampId={activeStampId}
+          onSelectStamp={setActiveStampId}
+          onAddStamp={handleAddStamp}
+          onDeleteStamp={handleDeleteStamp}
+          onUpdateStamp={handleUpdateStamp}
+          onClose={() => setTool('pen')}
         />
       )}
 

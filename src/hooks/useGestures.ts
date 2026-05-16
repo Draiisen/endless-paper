@@ -30,6 +30,9 @@ export interface GestureCallbacks {
   onMarqueeMove?: (startX: number, startY: number, endX: number, endY: number) => void;
   onMarqueeEnd?: (startX: number, startY: number, endX: number, endY: number) => void;
   onTextCreate?: (worldX: number, worldY: number, screenX: number, screenY: number) => void;
+  onStampStart?: (worldX: number, worldY: number) => void;
+  onStampMove?: (worldX: number, worldY: number) => void;
+  onStampEnd?: () => void;
 }
 
 export function useGestures(
@@ -383,6 +386,12 @@ export function useGestures(
       callbacksRef.current.onTextCreate?.(world.x, world.y, e.clientX, e.clientY);
       return;
     }
+
+    if (tool === 'stamp') {
+      isDrawing.current = true;
+      callbacksRef.current.onStampStart?.(world.x, world.y);
+      return;
+    }
   }, [getTool, getViewport]);
 
   const handlePointerMove = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -466,6 +475,8 @@ export function useGestures(
       } else if (tool === 'rect' || tool === 'circle') {
         shapeEndRef.current = { x: world.x, y: world.y };
         callbacksRef.current.onShapeMove?.(world.x, world.y);
+      } else if (tool === 'stamp') {
+        callbacksRef.current.onStampMove?.(world.x, world.y);
       }
       return;
     }
@@ -549,6 +560,8 @@ export function useGestures(
         callbacksRef.current.onShapeEnd?.(start.x, start.y, world.x, world.y);
         shapeStartRef.current = null;
         shapeEndRef.current = null;
+      } else if (tool === 'stamp') {
+        callbacksRef.current.onStampEnd?.();
       }
       opPointerId.current = null;
       return;

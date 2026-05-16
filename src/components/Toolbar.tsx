@@ -181,6 +181,10 @@ export function Toolbar({
         <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current"><path d="M15.14 3c-.51 0-1.02.2-1.41.59L2.59 14.73c-.78.77-.78 2.04 0 2.83L5.17 20H20v-2H9.84l-4-4L17 2.94l4 4V8h2V6.59c0-.51-.2-1.02-.59-1.41l-3.86-3.77C14.16 3.2 13.65 3 13.14 3h2z"/></svg>
       </ToolButton>
 
+      <ToolButton active={tool === 'stamp'} onClick={() => setTool('stamp')} title="Tampon / pinceau personnalisé (S)">
+        <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current"><path d="M7 14c-1.66 0-3 1.34-3 3 0 1.31-1.16 2-2 2 .92 1.22 2.49 2 4 2 2.21 0 4-1.79 4-4 0-1.66-1.34-3-3-3zm13.71-9.37l-1.34-1.34c-.39-.39-1.02-.39-1.41 0L9 12.25 11.75 15l8.96-8.96c.39-.39.39-1.02 0-1.41z"/></svg>
+      </ToolButton>
+
       <ToolButton active={tool === 'image'} onClick={() => fileInputRef.current?.click()} title="Importer une image (I)">
         <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
       </ToolButton>
