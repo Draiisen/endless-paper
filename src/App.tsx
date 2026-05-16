@@ -616,12 +616,12 @@ export default function App({ initialState, settings }: AppProps) {
 
   // Save / Load / New
   const handleManualSave = useCallback(() => {
-    const state: PersistedState = { version: 1, rootScene: getRootScene(), viewport: viewportRef.current, savedAt: Date.now(), assets: assetsRef.current };
+    const state: PersistedState = { version: 1, rootScene: getRootScene(), viewport: viewportRef.current, savedAt: Date.now(), assets: assetsRef.current, brushStamps: stampsRef.current };
     exportToFile(state);
   }, [getRootScene]);
 
   const handleShare = useCallback(async () => {
-    const state: PersistedState = { version: 1, rootScene: getRootScene(), viewport: viewportRef.current, savedAt: Date.now(), assets: assetsRef.current };
+    const state: PersistedState = { version: 1, rootScene: getRootScene(), viewport: viewportRef.current, savedAt: Date.now(), assets: assetsRef.current, brushStamps: stampsRef.current };
     try {
       const json = JSON.stringify(state);
       const cs = new CompressionStream('deflate-raw');
@@ -663,6 +663,7 @@ export default function App({ initialState, settings }: AppProps) {
       setSceneStack(createInitialSceneStack(newScene, newVp));
       setSelectedNodeIds(new Set());
       setAssets(state.assets ?? []);
+      setStamps(state.brushStamps ?? []);
       history.push(newScene, newVp);
       scheduleAutoSave();
     } catch { /* cancelled */ }
@@ -677,6 +678,7 @@ export default function App({ initialState, settings }: AppProps) {
     setSceneStack(createInitialSceneStack(newScene, newVp));
     setSelectedNodeIds(new Set());
     setAssets(state.assets ?? []);
+    setStamps(state.brushStamps ?? []);
     history.push(newScene, newVp);
     scheduleAutoSave();
   }, [setScene, setSceneStack, history, scheduleAutoSave, cancelAllLod]);
@@ -691,6 +693,8 @@ export default function App({ initialState, settings }: AppProps) {
     setSceneStack(createInitialSceneStack(newScene, newVp));
     setSelectedNodeIds(new Set());
     setAssets([]);
+    setStamps([]);
+    setActiveStampId(null);
     history.push(newScene, newVp);
     clearLocalStorage();
     void clearIDB();

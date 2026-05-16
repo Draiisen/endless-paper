@@ -24,6 +24,7 @@ export function HelpPanel({ onClose }: { onClose: () => void }) {
             <Row label="Sélection  V" desc="Clic = sélectionner, glisser = marquee" />
             <Row label="Main  H" desc="Pan sans déplacer d'objets" />
             <Row label="Gomme  E" desc="Tap un objet pour l'effacer" />
+            <Row label="Tampon  S" desc="Pinceau personnalisé — importez une image, peignez le long d'un tracé" />
             <Row label="Image  I" desc="Importer une image depuis l'appareil" />
           </Section>
 
@@ -41,6 +42,7 @@ export function HelpPanel({ onClose }: { onClose: () => void }) {
             <Row label="Entrer" desc="Double-tap ou bouton Z (desktop)" />
             <Row label="Sortir" desc="Dézoomez suffisamment ou ← Retour" />
             <Row label="Profondeur" desc="Illimitée — chaque scène peut contenir des scènes" />
+            <Row label="Délimitation" desc="Tirez les 8 poignées du cadre pour définir les bornes de la scène" />
           </Section>
 
           <Section title="💬 Interactivité">

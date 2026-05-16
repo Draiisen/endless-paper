@@ -5,7 +5,7 @@ const SLIDES = [
     emoji: '✏️',
     title: 'Canvas infini',
     desc: 'Dessinez librement sans limite de taille. Pincez pour zoomer, glissez pour naviguer.',
-    tips: ['Molette / pincement → zoom', 'Espace + glisser → déplacer la vue', 'F → tout afficher'],
+    tips: ['Molette / pincement → zoom', 'Espace + glisser → déplacer la vue', 'F → tout afficher', 'S → tampon personnalisé (image en pinceau)'],
     accent: '#6c63ff',
   },
   {
