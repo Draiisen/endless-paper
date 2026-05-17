@@ -47,36 +47,66 @@ function segmentsToPath(segments: Segment[]): string {
   return d + ' Z';
 }
 
-// ── Sample actual raster color for a layer (centroid of each path) ────────────
-// imagetracerjs palette colors drift from reality; sampling the source pixels
-// at each path's centroid gives accurate colors with no hue distortion.
+// ── Refine palette color by sampling raster inside each path's bbox ───────────
+// imagetracerjs palette is already close to correct; we refine it by blending
+// with the median raster sample from a 3×3 grid inside the path bounding box.
+// This corrects small drift while the palette anchors us to the right hue.
 
 interface TracePath { segments: Segment[] }
 
-function sampleLayerColor(
+function refinedLayerColor(
   data: Uint8ClampedArray, w: number, h: number,
   layerPaths: TracePath[],
+  paletteR: number, paletteG: number, paletteB: number,
 ): { r: number; g: number; b: number } {
-  let r = 0, g = 0, b = 0, count = 0;
+  const samples: Array<[number, number, number]> = [];
+
   for (const pathObj of layerPaths) {
     const segs = pathObj.segments;
-    if (!segs || segs.length === 0) continue;
-    let sx = 0, sy = 0, n = 0;
+    if (!segs || segs.length < 2) continue;
+
+    // Bounding box of all segment points
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     for (const s of segs) {
-      sx += s.x1 + s.x2; sy += s.y1 + s.y2; n += 2;
+      minX = Math.min(minX, s.x1, s.x2); maxX = Math.max(maxX, s.x1, s.x2);
+      minY = Math.min(minY, s.y1, s.y2); maxY = Math.max(maxY, s.y1, s.y2);
+      if (s.x3 !== undefined) {
+        minX = Math.min(minX, s.x3!); maxX = Math.max(maxX, s.x3!);
+        minY = Math.min(minY, s.y3!); maxY = Math.max(maxY, s.y3!);
+      }
     }
-    if (n === 0) continue;
-    const cx = Math.min(w - 1, Math.max(0, Math.round(sx / n)));
-    const cy = Math.min(h - 1, Math.max(0, Math.round(sy / n)));
-    const i = (cy * w + cx) * 4;
-    r += data[i]; g += data[i + 1]; b += data[i + 2];
-    count++;
+    if (!isFinite(minX)) continue;
+
+    // 3×3 grid in the inner 60% of bbox — avoids boundary pixels
+    const padX = (maxX - minX) * 0.2;
+    const padY = (maxY - minY) * 0.2;
+    for (let gi = 0; gi < 3; gi++) {
+      for (let gj = 0; gj < 3; gj++) {
+        const px = Math.round(minX + padX + ((maxX - minX - 2 * padX) * gi) / 2);
+        const py = Math.round(minY + padY + ((maxY - minY - 2 * padY) * gj) / 2);
+        if (px >= 0 && px < w && py >= 0 && py < h) {
+          const i = (py * w + px) * 4;
+          samples.push([data[i], data[i + 1], data[i + 2]]);
+        }
+      }
+    }
   }
-  if (count === 0) return { r: 0, g: 0, b: 0 };
+
+  if (samples.length === 0) return { r: paletteR, g: paletteG, b: paletteB };
+
+  // Component-wise median — robust against samples that fell in wrong region
+  const rs = samples.map(s => s[0]).sort((a, b) => a - b);
+  const gs = samples.map(s => s[1]).sort((a, b) => a - b);
+  const bs = samples.map(s => s[2]).sort((a, b) => a - b);
+  const mid = Math.floor(samples.length / 2);
+  const sampR = rs[mid], sampG = gs[mid], sampB = bs[mid];
+
+  // Blend: 60% raster sample + 40% palette — palette anchors the hue,
+  // raster corrects quantisation drift
   return {
-    r: Math.round(r / count),
-    g: Math.round(g / count),
-    b: Math.round(b / count),
+    r: Math.round(sampR * 0.6 + paletteR * 0.4),
+    g: Math.round(sampG * 0.6 + paletteG * 0.4),
+    b: Math.round(sampB * 0.6 + paletteB * 0.4),
   };
 }
 
@@ -115,9 +145,10 @@ function process(
 
     if (paths.length === 0) continue;
 
-    // Use raster-sampled color instead of palette — eliminates hue drift
-    const sampled = sampleLayerColor(data, w, h, tracedata.layers[li]);
-    layers.push({ r: sampled.r, g: sampled.g, b: sampled.b, a: color.a, paths });
+    const { r, g, b } = refinedLayerColor(
+      data, w, h, tracedata.layers[li], color.r, color.g, color.b,
+    );
+    layers.push({ r, g, b, a: color.a, paths });
   }
 
   return layers;
