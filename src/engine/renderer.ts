@@ -690,15 +690,13 @@ function drawVectorPath(ctx: CanvasRenderingContext2D, vp: VectorPath): void {
 export const imageCache = new LRUImageCache(50);
 
 /**
- * LOD selection:
- *   screenW < 70px        → thumbnail (fast preview at low zoom)
- *   ratio in [1.5, 2.5]   → smooth cross-fade raster → vector
- *   ratio > 2.5           → pure vector (infinite resolution)
- *   otherwise             → raster original
+ * LOD rendering:
+ *   screenW < 70px → thumbnail
+ *   zoomed past native res → imageSmoothingEnabled=false (crisp pixels, no blurry soup)
+ *   otherwise → standard smooth rendering
  *
- * ratio = (naturalW / node.width) * viewportScale
- * > 1 means the display pixel is smaller than a source pixel (zoomed past native res).
- * Blend starts at 1.5 (well past native) to keep raster dominant at moderate zoom.
+ * Color vector layers are disabled: flat k-means colors can't represent photo
+ * detail (eyes, gradients, highlights) and always look worse than the raster.
  */
 function drawImageLOD(ctx: CanvasRenderingContext2D, node: SceneNode, viewportScale: number): void {
   const screenW = node.width * viewportScale;
@@ -712,45 +710,18 @@ function drawImageLOD(ctx: CanvasRenderingContext2D, node: SceneNode, viewportSc
     }
   }
 
-  // ── Blend factor: raster → vector as zoom increases past native resolution ─
-  const lod = node.lod;
-  const nw = lod?.naturalW ?? 0;
-  const hasVectors = !!(lod?.colorLayers && lod.colorLayers.length > 0 &&
-    lod.sourceW > 0 && lod.sourceH > 0 && nw > 0);
-  const ratio = hasVectors && node.width > 0 ? (nw / node.width) * viewportScale : 0;
-  // Blend zone 1.5 → 3.0: start replacing raster only when well past native res
-  let vectorAlpha = hasVectors ? Math.min(1, Math.max(0, (ratio - 1.5) / 1.5)) : 0;
+  if (!node.imageData) return;
 
-  // Fade-in when vectors just finished loading (800 ms transition)
-  if (vectorAlpha > 0 && lod?.vectorLoadedAt) {
-    vectorAlpha *= Math.min(1, (Date.now() - lod.vectorLoadedAt) / 800);
+  // ── Switch to pixel-perfect rendering when zoomed past native resolution ──
+  // pixelRatio > 1 = each screen pixel is smaller than a source pixel.
+  // Bilinear smoothing makes it blurry; crisp mode makes each pixel a sharp square.
+  const nw = node.lod?.naturalW ?? 0;
+  const pixelRatio = nw > 0 && node.width > 0 ? (nw / node.width) * viewportScale : 0;
+  if (pixelRatio > 1.2) {
+    ctx.imageSmoothingEnabled = false;
   }
-
-  // ── Raster always at full opacity — never removed, fills gaps vectors miss ──
-  if (node.imageData) {
-    drawImage(ctx, node);
-  }
-
-  // ── Vector layer overlaid on top of raster as zoom increases ─────────────
-  // Vectors sharpen edges; raster underneath ensures no area is ever blank.
-  if (vectorAlpha > 0 && lod?.colorLayers) {
-    const outerAlpha = ctx.globalAlpha;
-    ctx.globalAlpha = outerAlpha * vectorAlpha * 0.92;
-    ctx.save();
-    ctx.transform(
-      node.width / lod.sourceW, 0,
-      0, node.height / lod.sourceH,
-      node.x, node.y,
-    );
-    for (const layer of lod.colorLayers) {
-      ctx.fillStyle = layer.color;
-      for (const vp of layer.paths) {
-        ctx.fill(getPath2D(vp.d));
-      }
-    }
-    ctx.restore();
-    ctx.globalAlpha = outerAlpha;
-  }
+  drawImage(ctx, node);
+  ctx.imageSmoothingEnabled = true;
 }
 
 function drawImage(ctx: CanvasRenderingContext2D, node: SceneNode): void {
