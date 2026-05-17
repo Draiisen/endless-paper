@@ -338,7 +338,7 @@ function process(data: Uint8ClampedArray, w: number, h: number, k: number): Laye
   const { centroidsRgb, assignments } = kMeans(data, n, k);
   if (centroidsRgb.length === 0) return [];
 
-  const minPixels = Math.max(30, n * 0.003);
+  const minPixels = Math.max(15, n * 0.001); // keep details down to 0.1% of image
   // Fine tolerance: blur already smooths, so we can keep more geometry detail
   const simplifyTol = Math.max(0.5, Math.min(w, h) / 400);
 
@@ -374,7 +374,7 @@ self.onmessage = (e: MessageEvent<WorkerInput>) => {
       (self as unknown as Worker).postMessage({ nodeId, layers: [], sourceW: width, sourceH: height });
       return;
     }
-    const layers = process(data, width, height, numColors ?? 12);
+    const layers = process(data, width, height, numColors ?? 14);
     (self as unknown as Worker).postMessage({ nodeId, layers, sourceW: width, sourceH: height } as WorkerOutput);
   } catch {
     (self as unknown as Worker).postMessage({ nodeId, layers: [], sourceW: width, sourceH: height } as WorkerOutput);
