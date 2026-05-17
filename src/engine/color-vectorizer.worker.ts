@@ -104,7 +104,7 @@ self.onmessage = (e: MessageEvent<WorkerInput>) => {
       (self as unknown as Worker).postMessage({ nodeId, layers: [], sourceW: width, sourceH: height });
       return;
     }
-    const layers = process(data, width, height, numColors ?? 20);
+    const layers = process(data, width, height, numColors ?? 16);
     (self as unknown as Worker).postMessage({ nodeId, layers, sourceW: width, sourceH: height } as WorkerOutput);
   } catch (err) {
     console.error('vectorizer error', err);
