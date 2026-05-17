@@ -737,22 +737,20 @@ function drawImageLOD(ctx: CanvasRenderingContext2D, node: SceneNode, viewportSc
   // ── Raster base layer ────────────────────────────────────────────────────
   if (node.imageData) drawImage(ctx, node);
 
-  // ── imagetracerjs vectors overlaid — crisp bezier edges ──────────────────
+  // ── imagetracerjs vectors in 'color' blend mode ───────────────────────────
+  // 'color' compositing: vectors supply hue+saturation, raster supplies
+  // luminance — so brightness, texture and whites are always preserved.
   if (vectorAlpha > 0 && lod?.colorLayers) {
     const outerAlpha = ctx.globalAlpha;
-    // Vectors at 80% max so raster always slightly bleeds through
-    ctx.globalAlpha = outerAlpha * vectorAlpha * 0.80;
     ctx.save();
+    ctx.globalAlpha = outerAlpha * vectorAlpha;
+    ctx.globalCompositeOperation = 'color';
     ctx.transform(node.width / lod.sourceW, 0, 0, node.height / lod.sourceH, node.x, node.y);
     for (const layer of lod.colorLayers) {
       ctx.fillStyle = layer.color;
       for (const vp of layer.paths) ctx.fill(getPath2D(vp.d));
     }
     ctx.restore();
-    // Raster texture overlay on top to restore photo detail
-    ctx.globalAlpha = outerAlpha * vectorAlpha * 0.30;
-    if (node.imageData) drawImage(ctx, node);
-    ctx.globalAlpha = outerAlpha;
   }
 }
 
