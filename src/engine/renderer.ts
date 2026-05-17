@@ -885,10 +885,18 @@ function drawLens(ctx: CanvasRenderingContext2D, node: SceneNode, viewportScale:
       node.width  * (1 - pad * 2) / fitW,
       node.height * (1 - pad * 2) / fitH,
     );
-    const ox = node.x + node.width  / 2 - (fitX + fitW / 2) * s;
-    const oy = node.y + node.height / 2 - (fitY + fitH / 2) * s;
+    const baseCx = node.x + node.width  / 2;
+    const baseCy = node.y + node.height / 2;
+    const baseOx = baseCx - (fitX + fitW / 2) * s;
+    const baseOy = baseCy - (fitY + fitH / 2) * s;
 
-    ctx.transform(s, 0, 0, s, ox, oy);
+    // Apply user-defined lens view adjustment on top of auto-fit.
+    const lv = node.lensView;
+    const userZoom = lv?.zoom ?? 1;
+    const ox = baseOx * userZoom + baseCx * (1 - userZoom) + (lv?.panX ?? 0);
+    const oy = baseOy * userZoom + baseCy * (1 - userZoom) + (lv?.panY ?? 0);
+
+    ctx.transform(s * userZoom, 0, 0, s * userZoom, ox, oy);
 
     const innerScale = viewportScale * s;
     for (const innerNode of inner.nodes.slice(0, 24)) {

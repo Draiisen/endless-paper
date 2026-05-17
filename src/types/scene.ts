@@ -92,6 +92,9 @@ export interface SceneNode {
   // Inner scene — content visible when you "enter" this node
   innerScene?: Scene;
 
+  // User-defined lens view offset/zoom applied on top of the auto-fit transform
+  lensView?: { panX: number; panY: number; zoom: number };
+
   // Cached bounding box of the inner scene's nodes (for smooth zoom transitions)
   innerSceneBounds?: { x: number; y: number; width: number; height: number };
 

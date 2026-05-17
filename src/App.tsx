@@ -83,6 +83,8 @@ export default function App({ initialState, settings }: AppProps) {
   const [viewerMode, setViewerMode] = useState(false);
   const [tourPlaying, setTourPlaying] = useState(false);
   const [showSaves, setShowSaves] = useState(false);
+  const [lensAdjustId, setLensAdjustId] = useState<string | null>(null);
+  const lensAdjustDragRef = useRef<{ startX: number; startY: number; startPanX: number; startPanY: number } | null>(null);
   const [projectSizeMB, setProjectSizeMB] = useState(0);
   const [lodProcessingCount, setLodProcessingCount] = useState(0);
   const [shareFlash, setShareFlash] = useState<'copied' | 'toobig' | null>(null);
@@ -1660,6 +1662,18 @@ export default function App({ initialState, settings }: AppProps) {
               {singleSelection.lodMode === 'vector' ? 'Vect.' : 'Rast.'}
             </button>
           )}
+          {/* Lens view adjust — lens nodes only */}
+          {singleSelection?.innerScene && (
+            <>
+              <div className="w-px h-5 bg-white/15 mx-0.5" />
+              <button
+                onClick={() => setLensAdjustId(lensAdjustId === singleSelection.id ? null : singleSelection.id)}
+                className={`px-2.5 h-11 flex items-center justify-center rounded-xl touch-manipulation transition-colors text-[11px] font-medium ${lensAdjustId === singleSelection.id ? 'bg-accent/20 text-accent' : 'text-gray-400 active:text-white active:bg-white/10'}`}
+                title="Cadrer la vue de la lentille">
+                🔍
+              </button>
+            </>
+          )}
           <div className="w-px h-5 bg-white/15 mx-0.5" />
           {/* Duplicate */}
           <button onClick={handleDuplicate}
@@ -1693,6 +1707,65 @@ export default function App({ initialState, settings }: AppProps) {
 
       {/* Hotspot popup */}
       <PopupDisplay popup={popup} onDismiss={dismissPopup} />
+
+      {/* Lens view adjustment overlay */}
+      {lensAdjustId && (() => {
+        const lensNode = scene.nodes.find(n => n.id === lensAdjustId);
+        if (!lensNode) return null;
+        // Compute screen-space bounding rect of the lens node
+        const sx = lensNode.x * viewport.scale + viewport.x;
+        const sy = lensNode.y * viewport.scale + viewport.y;
+        const sw = lensNode.width * viewport.scale;
+        const sh = lensNode.height * viewport.scale;
+        return (
+          <>
+            {/* Dim everything outside the lens */}
+            <div className="fixed inset-0 z-30 pointer-events-none" style={{ background: 'rgba(0,0,0,0.35)' }} />
+            {/* Interactive lens area */}
+            <div
+              className="fixed z-31 touch-none"
+              style={{ left: sx, top: sy, width: sw, height: sh, cursor: 'grab', border: '2px solid #9d4edd', borderRadius: 4 }}
+              onPointerDown={e => {
+                e.currentTarget.setPointerCapture(e.pointerId);
+                const lv = lensNode.lensView ?? { panX: 0, panY: 0, zoom: 1 };
+                lensAdjustDragRef.current = { startX: e.clientX, startY: e.clientY, startPanX: lv.panX, startPanY: lv.panY };
+              }}
+              onPointerMove={e => {
+                if (!lensAdjustDragRef.current) return;
+                const dx = (e.clientX - lensAdjustDragRef.current.startX) / viewport.scale;
+                const dy = (e.clientY - lensAdjustDragRef.current.startY) / viewport.scale;
+                handleUpdateSelectedNode({
+                  lensView: {
+                    ...(lensNode.lensView ?? { zoom: 1 }),
+                    panX: lensAdjustDragRef.current.startPanX + dx,
+                    panY: lensAdjustDragRef.current.startPanY + dy,
+                  },
+                });
+              }}
+              onPointerUp={() => { lensAdjustDragRef.current = null; }}
+              onWheel={e => {
+                e.preventDefault();
+                const lv = lensNode.lensView ?? { panX: 0, panY: 0, zoom: 1 };
+                const factor = e.deltaY < 0 ? 1.1 : 0.9;
+                handleUpdateSelectedNode({ lensView: { ...lv, zoom: Math.max(0.1, Math.min(10, lv.zoom * factor)) } });
+              }}
+            />
+            {/* "Done" pill */}
+            <div className="fixed z-32 flex gap-2 items-center" style={{ left: sx, top: Math.max(8, sy - 40) }}>
+              <button
+                onClick={() => { handleUpdateSelectedNode({ lensView: undefined }); }}
+                className="px-3 py-1 rounded-full text-[11px] bg-white/10 text-gray-300 active:bg-white/20 touch-manipulation">
+                Réinitialiser
+              </button>
+              <button
+                onClick={() => setLensAdjustId(null)}
+                className="px-3 py-1 rounded-full text-[11px] bg-accent text-white active:bg-accent/80 touch-manipulation">
+                Terminé
+              </button>
+            </div>
+          </>
+        );
+      })()}
 
       {/* Empty canvas onboarding hint */}
       {scene.nodes.length === 0 && sceneStack.length === 1 && !viewerMode && (
