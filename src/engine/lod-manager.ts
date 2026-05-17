@@ -66,10 +66,10 @@ export function requestColorVectorization(
     // Build ColorLayers keeping paths in source-pixel space.
     // The renderer will apply a canvas transform to map them to world coords.
     const colorLayers: ColorLayer[] = layers.filter(layer => {
-      // Skip near-white/near-transparent layers — the raster already renders
-      // these correctly and the slightly-off-white vectors only darken them.
+      // Skip near-white and near-black layers — the raster renders them correctly
+      // and dark vectors opaquely covering the image hide fine detail (e.g. eye irises).
       const luma = 0.299 * layer.r + 0.587 * layer.g + 0.114 * layer.b;
-      return luma < 210 && layer.a >= 64;
+      return luma > 25 && luma < 210 && layer.a >= 64;
     }).map(layer => {
       const color = layer.a < 255
         ? `rgba(${layer.r},${layer.g},${layer.b},${(layer.a/255).toFixed(3)})`
