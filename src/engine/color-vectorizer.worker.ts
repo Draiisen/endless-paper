@@ -45,6 +45,74 @@ function segmentsToPath(segments: Segment[]): string {
   return d + ' Z';
 }
 
+// ── Two-pass colour sampling via OffscreenCanvas ──────────────────────────────
+// Pass 1: mean of all pixels inside the rasterised path mask.
+// Pass 2: mean of only pixels within L2-distance 50 of pass-1 mean.
+// This filters out boundary pixels that bleed in from adjacent regions,
+// giving the true dominant colour of the region regardless of palette drift.
+
+const SAMPLE_RES = 160;
+
+function computeLayerColor(
+  rasterData: Uint8ClampedArray,
+  rasterW: number, rasterH: number,
+  pathStrings: string[],
+  fallbackR: number, fallbackG: number, fallbackB: number,
+): { r: number; g: number; b: number } {
+  try {
+    const scale = SAMPLE_RES / Math.max(rasterW, rasterH);
+    const sw = Math.max(1, Math.round(rasterW * scale));
+    const sh = Math.max(1, Math.round(rasterH * scale));
+
+    const oc = new OffscreenCanvas(sw, sh);
+    const octx = oc.getContext('2d')!;
+    octx.scale(scale, scale);
+    octx.fillStyle = 'white';
+    for (const d of pathStrings) octx.fill(new Path2D(d));
+    const mask = octx.getImageData(0, 0, sw, sh).data;
+
+    // Pass 1 — overall mean
+    let mr = 0, mg = 0, mb = 0, mc = 0;
+    for (let py = 0; py < sh; py++) {
+      for (let px = 0; px < sw; px++) {
+        if (mask[(py * sw + px) * 4] < 128) continue;
+        const rx = Math.min(rasterW - 1, Math.round(px / scale));
+        const ry = Math.min(rasterH - 1, Math.round(py / scale));
+        const ri = (ry * rasterW + rx) * 4;
+        mr += rasterData[ri]; mg += rasterData[ri + 1]; mb += rasterData[ri + 2]; mc++;
+      }
+    }
+    if (mc === 0) return { r: fallbackR, g: fallbackG, b: fallbackB };
+    mr /= mc; mg /= mc; mb /= mc;
+
+    // Pass 2 — mean of pixels within L2 = 50 of pass-1 mean
+    // (removes edge pixels from neighbouring colour regions)
+    const T2 = 50 * 50;
+    let fr = 0, fg = 0, fb = 0, fc = 0;
+    for (let py = 0; py < sh; py++) {
+      for (let px = 0; px < sw; px++) {
+        if (mask[(py * sw + px) * 4] < 128) continue;
+        const rx = Math.min(rasterW - 1, Math.round(px / scale));
+        const ry = Math.min(rasterH - 1, Math.round(py / scale));
+        const ri = (ry * rasterW + rx) * 4;
+        const dr = rasterData[ri] - mr;
+        const dg = rasterData[ri + 1] - mg;
+        const db = rasterData[ri + 2] - mb;
+        if (dr * dr + dg * dg + db * db < T2) {
+          fr += rasterData[ri]; fg += rasterData[ri + 1]; fb += rasterData[ri + 2]; fc++;
+        }
+      }
+    }
+
+    if (fc === 0) return { r: Math.round(mr), g: Math.round(mg), b: Math.round(mb) };
+    return { r: Math.round(fr / fc), g: Math.round(fg / fc), b: Math.round(fb / fc) };
+  } catch {
+    return { r: fallbackR, g: fallbackG, b: fallbackB };
+  }
+}
+
+// ── Main processing ───────────────────────────────────────────────────────────
+
 function process(data: Uint8ClampedArray, w: number, h: number): LayerData[] {
   const imgData = { data, width: w, height: h };
 
@@ -74,11 +142,15 @@ function process(data: Uint8ClampedArray, w: number, h: number): LayerData[] {
     }
 
     if (paths.length === 0) continue;
-    layers.push({ r: color.r, g: color.g, b: color.b, a: color.a, paths });
+
+    const { r, g, b } = computeLayerColor(data, w, h, paths, color.r, color.g, color.b);
+    layers.push({ r, g, b, a: color.a, paths });
   }
 
   return layers;
 }
+
+// ── Worker entry point ────────────────────────────────────────────────────────
 
 self.onmessage = (e: MessageEvent<WorkerInput>) => {
   const { nodeId, pixels, width, height } = e.data;
