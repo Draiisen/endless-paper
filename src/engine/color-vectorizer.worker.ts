@@ -65,11 +65,11 @@ function process(
   const options = {
     numberofcolors: numColors,
     colorsampling: 2,
-    blurradius: 1,
+    blurradius: 0,
     blurdelta: 20,
-    ltres: 0.2,
-    qtres: 0.2,
-    pathomit: 2,
+    ltres: 0.1,
+    qtres: 0.1,
+    pathomit: 1,
     rightangleenhance: true,
   };
 
