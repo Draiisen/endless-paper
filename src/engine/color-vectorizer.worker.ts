@@ -52,7 +52,6 @@ function segmentsToPath(segments: Segment[]): string {
 function process(
   data: Uint8ClampedArray,
   w: number, h: number,
-  numColors: number,
 ): LayerData[] {
   const imgData = { data, width: w, height: h };
 
@@ -97,14 +96,14 @@ function process(
 // ── Worker entry point ────────────────────────────────────────────────────────
 
 self.onmessage = (e: MessageEvent<WorkerInput>) => {
-  const { nodeId, pixels, width, height, numColors } = e.data;
+  const { nodeId, pixels, width, height } = e.data;
   try {
     const data = new Uint8ClampedArray(pixels);
     if (width < 1 || height < 1 || data.length < width * height * 4) {
       (self as unknown as Worker).postMessage({ nodeId, layers: [], sourceW: width, sourceH: height });
       return;
     }
-    const layers = process(data, width, height, numColors ?? 16);
+    const layers = process(data, width, height);
     (self as unknown as Worker).postMessage({ nodeId, layers, sourceW: width, sourceH: height } as WorkerOutput);
   } catch (err) {
     console.error('vectorizer error', err);
