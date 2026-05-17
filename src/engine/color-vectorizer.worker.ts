@@ -47,6 +47,39 @@ function segmentsToPath(segments: Segment[]): string {
   return d + ' Z';
 }
 
+// ── Sample actual raster color for a layer (centroid of each path) ────────────
+// imagetracerjs palette colors drift from reality; sampling the source pixels
+// at each path's centroid gives accurate colors with no hue distortion.
+
+interface TracePath { segments: Segment[] }
+
+function sampleLayerColor(
+  data: Uint8ClampedArray, w: number, h: number,
+  layerPaths: TracePath[],
+): { r: number; g: number; b: number } {
+  let r = 0, g = 0, b = 0, count = 0;
+  for (const pathObj of layerPaths) {
+    const segs = pathObj.segments;
+    if (!segs || segs.length === 0) continue;
+    let sx = 0, sy = 0, n = 0;
+    for (const s of segs) {
+      sx += s.x1 + s.x2; sy += s.y1 + s.y2; n += 2;
+    }
+    if (n === 0) continue;
+    const cx = Math.min(w - 1, Math.max(0, Math.round(sx / n)));
+    const cy = Math.min(h - 1, Math.max(0, Math.round(sy / n)));
+    const i = (cy * w + cx) * 4;
+    r += data[i]; g += data[i + 1]; b += data[i + 2];
+    count++;
+  }
+  if (count === 0) return { r: 0, g: 0, b: 0 };
+  return {
+    r: Math.round(r / count),
+    g: Math.round(g / count),
+    b: Math.round(b / count),
+  };
+}
+
 // ── Main processing ───────────────────────────────────────────────────────────
 
 function process(
@@ -55,12 +88,6 @@ function process(
 ): LayerData[] {
   const imgData = { data, width: w, height: h };
 
-  // imagetracerjs options tuned for photo quality:
-  // - blurradius 1: slight pre-blur to reduce noise before tracing
-  // - ltres/qtres 0.5: fine curve thresholds → more quadratic beziers, fewer straight segments
-  // - pathomit 4: skip paths shorter than 4px (removes noise specks)
-  // - colorsampling 2: deterministic palette sampling
-  // - numberofcolors: from caller (default 16)
   const options = {
     numberofcolors: 24,
     colorsampling: 2,
@@ -77,7 +104,7 @@ function process(
   const layers: LayerData[] = [];
   for (let li = 0; li < tracedata.layers.length; li++) {
     const color = tracedata.palette[li];
-    if (!color || color.a < 64) continue; // skip transparent clusters
+    if (!color || color.a < 64) continue;
 
     const paths: string[] = [];
     for (const pathObj of tracedata.layers[li]) {
@@ -87,7 +114,10 @@ function process(
     }
 
     if (paths.length === 0) continue;
-    layers.push({ r: color.r, g: color.g, b: color.b, a: color.a, paths });
+
+    // Use raster-sampled color instead of palette — eliminates hue drift
+    const sampled = sampleLayerColor(data, w, h, tracedata.layers[li]);
+    layers.push({ r: sampled.r, g: sampled.g, b: sampled.b, a: color.a, paths });
   }
 
   return layers;
