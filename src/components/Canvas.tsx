@@ -1710,8 +1710,11 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
       case 'hand': return 'grab';
       case 'pen': {
         if (pressureEnabled) {
+          // Apply same widthMap as renderLiveStroke so cursor matches actual stroke.
+          const widthMap: Record<string, number> = { pen: 1, pencil: 0.85, marker: 2, brush: 1.4 };
+          const bw = widthMap[brushType] ?? 1;
           // Browsers limit cursor images to ~32px; cap accordingly.
-          const r = Math.max(2, Math.min(14, strokeWidth * viewport.scale * 0.5));
+          const r = Math.max(2, Math.min(14, strokeWidth * viewport.scale * 0.5 * bw));
           const size = Math.ceil(r * 2 + 4);
           const center = size / 2;
           const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${size}' height='${size}'><circle cx='${center}' cy='${center}' r='${r}' fill='none' stroke='%231a1a2e' stroke-width='1.5'/></svg>`;
