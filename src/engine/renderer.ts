@@ -706,9 +706,9 @@ export const imageCache = new LRUImageCache(50);
 
 /**
  * LOD rendering:
- *   screenW < 70px  → 64px thumbnail
- *   otherwise       → full raster, high-quality smoothing up to native res,
- *                     nearest-neighbor beyond native res (crisp, no color artifacts)
+ *   screenW < 70px           → 64px thumbnail
+ *   lodMode = 'raster'       → bilinear below native res, nearest-neighbor above
+ *   lodMode = 'vector'       → raster base + vector overlay fades in at high zoom
  */
 function drawImageLOD(ctx: CanvasRenderingContext2D, node: SceneNode, viewportScale: number): void {
   const screenW = node.width * viewportScale;
@@ -722,19 +722,41 @@ function drawImageLOD(ctx: CanvasRenderingContext2D, node: SceneNode, viewportSc
     }
   }
 
-  // ── Full raster ───────────────────────────────────────────────────────────
-  // Beyond native resolution: nearest-neighbor keeps pixels sharp and correct.
-  // Below native resolution: high-quality bilinear looks best.
   const nw = node.lod?.naturalW ?? 0;
-  const beyondNative = nw > 0 && node.width > 0 && (nw / node.width) * viewportScale > 1;
-  if (beyondNative) {
-    ctx.imageSmoothingEnabled = false;
+  const ratio = nw > 0 && node.width > 0 ? (nw / node.width) * viewportScale : 0;
+
+  if (node.lodMode === 'vector') {
+    // ── Vector mode: raster base + vector overlay ─────────────────────────
+    if (node.imageData) drawImage(ctx, node);
+
+    const colorLayers = node.lod?.colorLayers;
+    if (!colorLayers || colorLayers.length === 0) return;
+    if (ratio < 1.5) return;
+
+    const vectorAlpha = Math.min(0.92, (ratio - 1.5) / 1.5);
+    const sourceW = node.lod!.sourceW;
+    const sourceH = node.lod!.sourceH;
+    if (!sourceW || !sourceH) return;
+
+    ctx.save();
+    ctx.globalAlpha = vectorAlpha;
+    ctx.transform(node.width / sourceW, 0, 0, node.height / sourceH, node.x, node.y);
+    for (const layer of colorLayers) {
+      ctx.fillStyle = layer.color;
+      for (const vp of layer.paths) ctx.fill(getPath2D(vp.d));
+    }
+    ctx.restore();
   } else {
+    // ── Raster mode (default): best-quality bilinear / nearest-neighbor ───
+    if (ratio > 1) {
+      ctx.imageSmoothingEnabled = false;
+    } else {
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+    }
+    if (node.imageData) drawImage(ctx, node);
     ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
   }
-  if (node.imageData) drawImage(ctx, node);
-  ctx.imageSmoothingEnabled = true;
 }
 
 function drawImage(ctx: CanvasRenderingContext2D, node: SceneNode): void {

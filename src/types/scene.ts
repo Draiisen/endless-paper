@@ -111,6 +111,9 @@ export interface SceneNode {
   isReference?: boolean;
   referenceOpacity?: number; // 0..1, default 0.35
 
+  // Zoom rendering mode: 'raster' (default, bilinear/nearest-neighbor) or 'vector' (SVG overlay)
+  lodMode?: 'raster' | 'vector';
+
   // Level-of-detail data generated automatically on image import
   lod?: ImageLOD;
 }

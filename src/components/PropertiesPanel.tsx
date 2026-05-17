@@ -156,8 +156,28 @@ function TextEditor({ node, onUpdate }: { node: SceneNode; onUpdate: (u: Partial
 
 function ImageEditor({ node, onUpdate }: { node: SceneNode; onUpdate: (u: Partial<SceneNode>) => void }) {
   const opacity = node.referenceOpacity ?? 0.35;
+  const lodMode = node.lodMode ?? 'raster';
   return (
     <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-1">
+        <span className="text-gray-400 text-[11px] uppercase tracking-wide">Mode zoom</span>
+        <div className="flex gap-1">
+          <button
+            onClick={() => onUpdate({ lodMode: 'raster' })}
+            className={`flex-1 py-1.5 rounded text-[12px] ${lodMode === 'raster' ? 'bg-accent text-white' : 'bg-white/5 text-gray-400 hover:text-white'}`}>
+            Raster
+          </button>
+          <button
+            onClick={() => onUpdate({ lodMode: 'vector' })}
+            className={`flex-1 py-1.5 rounded text-[12px] ${lodMode === 'vector' ? 'bg-accent text-white' : 'bg-white/5 text-gray-400 hover:text-white'}`}>
+            Vecteur
+          </button>
+        </div>
+        <span className="text-gray-500 text-[10px]">
+          {lodMode === 'vector' ? 'Idéal pour dessins à aplats de couleurs' : 'Idéal pour photos'}
+        </span>
+      </div>
+
       <label className="flex items-center gap-2 cursor-pointer">
         <input type="checkbox" checked={!!node.isReference}
           onChange={e => onUpdate({ isReference: e.target.checked })}
