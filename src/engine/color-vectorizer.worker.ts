@@ -45,75 +45,6 @@ function segmentsToPath(segments: Segment[]): string {
   return d + ' Z';
 }
 
-// ── Accurate color: rasterise paths at low-res, average raster pixels inside ──
-// imagetracerjs palette drifts (blue→green etc). OffscreenCanvas lets us
-// rasterise the exact path mask and sample the original pixels inside it.
-
-const SAMPLE_RES = 160;
-
-function computeLayerColor(
-  rasterData: Uint8ClampedArray,
-  rasterW: number,
-  rasterH: number,
-  pathStrings: string[],
-  fallbackR: number, fallbackG: number, fallbackB: number,
-): { r: number; g: number; b: number } {
-  try {
-    const scale = SAMPLE_RES / Math.max(rasterW, rasterH);
-    const sw = Math.max(1, Math.round(rasterW * scale));
-    const sh = Math.max(1, Math.round(rasterH * scale));
-
-    // Rasterise paths into a mask at reduced resolution
-    const oc = new OffscreenCanvas(sw, sh);
-    const octx = oc.getContext('2d')!;
-    octx.scale(scale, scale);
-    octx.fillStyle = 'white';
-    for (const d of pathStrings) {
-      octx.fill(new Path2D(d));
-    }
-    const mask = octx.getImageData(0, 0, sw, sh).data;
-
-    // 3-D colour histogram (16 levels/channel = 4096 buckets) — gives the
-    // dominant colour in the region, not the mean (which desaturates gradients)
-    const BINS = 16;
-    const binSz = 256 / BINS;
-    const hist = new Uint32Array(BINS * BINS * BINS);
-    let count = 0;
-    for (let py = 0; py < sh; py++) {
-      for (let px = 0; px < sw; px++) {
-        if (mask[(py * sw + px) * 4] < 128) continue;
-        const rx = Math.min(rasterW - 1, Math.round(px / scale));
-        const ry = Math.min(rasterH - 1, Math.round(py / scale));
-        const ri = (ry * rasterW + rx) * 4;
-        const br = Math.floor(rasterData[ri]     / binSz);
-        const bg = Math.floor(rasterData[ri + 1] / binSz);
-        const bb = Math.floor(rasterData[ri + 2] / binSz);
-        hist[br * BINS * BINS + bg * BINS + bb]++;
-        count++;
-      }
-    }
-
-    if (count === 0) return { r: fallbackR, g: fallbackG, b: fallbackB };
-
-    let maxCount = 0, maxIdx = 0;
-    for (let i = 0; i < hist.length; i++) {
-      if (hist[i] > maxCount) { maxCount = hist[i]; maxIdx = i; }
-    }
-    const binB = maxIdx % BINS;
-    const binG = Math.floor(maxIdx / BINS) % BINS;
-    const binR = Math.floor(maxIdx / (BINS * BINS));
-    return {
-      r: Math.round((binR + 0.5) * binSz),
-      g: Math.round((binG + 0.5) * binSz),
-      b: Math.round((binB + 0.5) * binSz),
-    };
-  } catch {
-    return { r: fallbackR, g: fallbackG, b: fallbackB };
-  }
-}
-
-// ── Main processing ───────────────────────────────────────────────────────────
-
 function process(data: Uint8ClampedArray, w: number, h: number): LayerData[] {
   const imgData = { data, width: w, height: h };
 
@@ -143,16 +74,11 @@ function process(data: Uint8ClampedArray, w: number, h: number): LayerData[] {
     }
 
     if (paths.length === 0) continue;
-
-    // Sample actual raster color inside the rasterised path mask
-    const { r, g, b } = computeLayerColor(data, w, h, paths, color.r, color.g, color.b);
-    layers.push({ r, g, b, a: color.a, paths });
+    layers.push({ r: color.r, g: color.g, b: color.b, a: color.a, paths });
   }
 
   return layers;
 }
-
-// ── Worker entry point ────────────────────────────────────────────────────────
 
 self.onmessage = (e: MessageEvent<WorkerInput>) => {
   const { nodeId, pixels, width, height } = e.data;
