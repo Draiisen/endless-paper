@@ -73,23 +73,40 @@ function computeLayerColor(
     }
     const mask = octx.getImageData(0, 0, sw, sh).data;
 
-    // Average the original raster pixels that fall inside the mask
-    let r = 0, g = 0, b = 0, count = 0;
+    // 3-D colour histogram (16 levels/channel = 4096 buckets) — gives the
+    // dominant colour in the region, not the mean (which desaturates gradients)
+    const BINS = 16;
+    const binSz = 256 / BINS;
+    const hist = new Uint32Array(BINS * BINS * BINS);
+    let count = 0;
     for (let py = 0; py < sh; py++) {
       for (let px = 0; px < sw; px++) {
-        if (mask[(py * sw + px) * 4] < 128) continue; // outside path
+        if (mask[(py * sw + px) * 4] < 128) continue;
         const rx = Math.min(rasterW - 1, Math.round(px / scale));
         const ry = Math.min(rasterH - 1, Math.round(py / scale));
         const ri = (ry * rasterW + rx) * 4;
-        r += rasterData[ri];
-        g += rasterData[ri + 1];
-        b += rasterData[ri + 2];
+        const br = Math.floor(rasterData[ri]     / binSz);
+        const bg = Math.floor(rasterData[ri + 1] / binSz);
+        const bb = Math.floor(rasterData[ri + 2] / binSz);
+        hist[br * BINS * BINS + bg * BINS + bb]++;
         count++;
       }
     }
 
     if (count === 0) return { r: fallbackR, g: fallbackG, b: fallbackB };
-    return { r: Math.round(r / count), g: Math.round(g / count), b: Math.round(b / count) };
+
+    let maxCount = 0, maxIdx = 0;
+    for (let i = 0; i < hist.length; i++) {
+      if (hist[i] > maxCount) { maxCount = hist[i]; maxIdx = i; }
+    }
+    const binB = maxIdx % BINS;
+    const binG = Math.floor(maxIdx / BINS) % BINS;
+    const binR = Math.floor(maxIdx / (BINS * BINS));
+    return {
+      r: Math.round((binR + 0.5) * binSz),
+      g: Math.round((binG + 0.5) * binSz),
+      b: Math.round((binB + 0.5) * binSz),
+    };
   } catch {
     return { r: fallbackR, g: fallbackG, b: fallbackB };
   }
