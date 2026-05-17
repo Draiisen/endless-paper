@@ -1648,6 +1648,19 @@ export default function App({ initialState, settings }: AppProps) {
             <span className="text-gray-600 text-[10px] px-1 select-none tabular-nums">{selectedNodes.length}</span>
           )}
           <div className="w-px h-5 bg-white/15 mx-0.5" />
+          {/* Zoom mode toggle — image only */}
+          {singleSelection?.type === 'image' && (
+            <button
+              onClick={() => {
+                const next = singleSelection.lodMode === 'vector' ? 'raster' : 'vector';
+                handleUpdateSelectedNode({ lodMode: next });
+              }}
+              className={`px-2.5 h-11 flex items-center justify-center rounded-xl touch-manipulation transition-colors text-[11px] font-medium ${singleSelection.lodMode === 'vector' ? 'bg-accent/20 text-accent' : 'text-gray-400 active:text-white active:bg-white/10'}`}
+              title="Mode zoom : Raster / Vecteur">
+              {singleSelection.lodMode === 'vector' ? 'Vect.' : 'Rast.'}
+            </button>
+          )}
+          <div className="w-px h-5 bg-white/15 mx-0.5" />
           {/* Duplicate */}
           <button onClick={handleDuplicate}
             className="w-11 h-11 flex items-center justify-center rounded-xl text-gray-400 active:text-white active:bg-white/10 touch-manipulation transition-colors text-base"
