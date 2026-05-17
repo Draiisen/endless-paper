@@ -65,7 +65,7 @@ function process(
   const options = {
     numberofcolors: numColors,
     colorsampling: 2,
-    blurradius: 2,
+    blurradius: 1,
     blurdelta: 20,
     ltres: 0.5,
     qtres: 0.5,
