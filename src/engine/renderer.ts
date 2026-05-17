@@ -737,14 +737,11 @@ function drawImageLOD(ctx: CanvasRenderingContext2D, node: SceneNode, viewportSc
   // ── Raster base layer ────────────────────────────────────────────────────
   if (node.imageData) drawImage(ctx, node);
 
-  // ── imagetracerjs vectors in 'color' blend mode ───────────────────────────
-  // 'color' compositing: vectors supply hue+saturation, raster supplies
-  // luminance — so brightness, texture and whites are always preserved.
+  // ── imagetracerjs vectors at 65% — raster always bleeds through ──────────
   if (vectorAlpha > 0 && lod?.colorLayers) {
     const outerAlpha = ctx.globalAlpha;
     ctx.save();
-    ctx.globalAlpha = outerAlpha * vectorAlpha;
-    ctx.globalCompositeOperation = 'color';
+    ctx.globalAlpha = outerAlpha * vectorAlpha * 0.65;
     ctx.transform(node.width / lod.sourceW, 0, 0, node.height / lod.sourceH, node.x, node.y);
     for (const layer of lod.colorLayers) {
       ctx.fillStyle = layer.color;
