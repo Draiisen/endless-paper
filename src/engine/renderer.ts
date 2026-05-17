@@ -691,12 +691,12 @@ export const imageCache = new LRUImageCache(50);
 
 /**
  * LOD rendering:
- *   screenW < 70px → thumbnail
- *   zoomed past native res → imageSmoothingEnabled=false (crisp pixels, no blurry soup)
- *   otherwise → standard smooth rendering
+ *   screenW < 70px        → thumbnail
+ *   ratio 1.5 → 3.0       → raster (full) + imagetracerjs vectors fade in on top
+ *   ratio > 3.0           → raster (full) + vectors at full opacity
  *
- * Color vector layers are disabled: flat k-means colors can't represent photo
- * detail (eyes, gradients, highlights) and always look worse than the raster.
+ * Raster is ALWAYS drawn first at full opacity so no area is ever blank.
+ * Vectors are overlaid on top to provide crisp bezier edges at high zoom.
  */
 function drawImageLOD(ctx: CanvasRenderingContext2D, node: SceneNode, viewportScale: number): void {
   const screenW = node.width * viewportScale;
@@ -710,18 +710,31 @@ function drawImageLOD(ctx: CanvasRenderingContext2D, node: SceneNode, viewportSc
     }
   }
 
-  if (!node.imageData) return;
-
-  // ── Switch to pixel-perfect rendering when zoomed past native resolution ──
-  // pixelRatio > 1 = each screen pixel is smaller than a source pixel.
-  // Bilinear smoothing makes it blurry; crisp mode makes each pixel a sharp square.
-  const nw = node.lod?.naturalW ?? 0;
-  const pixelRatio = nw > 0 && node.width > 0 ? (nw / node.width) * viewportScale : 0;
-  if (pixelRatio > 1.2) {
-    ctx.imageSmoothingEnabled = false;
+  const lod = node.lod;
+  const nw = lod?.naturalW ?? 0;
+  const hasVectors = !!(lod?.colorLayers && lod.colorLayers.length > 0 && lod.sourceW > 0 && nw > 0);
+  const ratio = hasVectors && node.width > 0 ? (nw / node.width) * viewportScale : 0;
+  let vectorAlpha = hasVectors ? Math.min(1, Math.max(0, (ratio - 1.5) / 1.5)) : 0;
+  if (vectorAlpha > 0 && lod?.vectorLoadedAt) {
+    vectorAlpha *= Math.min(1, (Date.now() - lod.vectorLoadedAt) / 800);
   }
-  drawImage(ctx, node);
-  ctx.imageSmoothingEnabled = true;
+
+  // ── Raster always at full opacity — never hidden ──────────────────────────
+  if (node.imageData) drawImage(ctx, node);
+
+  // ── imagetracerjs vectors overlaid on top — crisp bezier edges ───────────
+  if (vectorAlpha > 0 && lod?.colorLayers) {
+    const outerAlpha = ctx.globalAlpha;
+    ctx.globalAlpha = outerAlpha * vectorAlpha;
+    ctx.save();
+    ctx.transform(node.width / lod.sourceW, 0, 0, node.height / lod.sourceH, node.x, node.y);
+    for (const layer of lod.colorLayers) {
+      ctx.fillStyle = layer.color;
+      for (const vp of layer.paths) ctx.fill(getPath2D(vp.d));
+    }
+    ctx.restore();
+    ctx.globalAlpha = outerAlpha;
+  }
 }
 
 function drawImage(ctx: CanvasRenderingContext2D, node: SceneNode): void {
