@@ -67,9 +67,9 @@ function process(
     colorsampling: 2,
     blurradius: 1,
     blurdelta: 20,
-    ltres: 0.5,
-    qtres: 0.5,
-    pathomit: 4,
+    ltres: 0.2,
+    qtres: 0.2,
+    pathomit: 2,
     rightangleenhance: true,
   };
 
