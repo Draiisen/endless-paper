@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { SceneNode, Hotspot, NodeAnimation, SceneAudio } from '../types/scene';
 import { SceneCatalogEntry } from '../engine/scene-graph';
 
@@ -24,6 +24,30 @@ export function PropertiesPanel({ node, sceneCatalog, currentSceneId, onUpdate, 
   const [savedFlash, setSavedFlash] = useState(false);
   const savedTimerRef = useRef<number | null>(null);
 
+  // Draggable position — default: top-right, above the action bar
+  const PANEL_W = 256;
+  const defaultPos = () => ({
+    x: Math.max(0, window.innerWidth - PANEL_W - 8),
+    y: 56,
+  });
+  const [pos, setPos] = useState(defaultPos);
+  const dragOffsetRef = useRef<{ dx: number; dy: number } | null>(null);
+
+  // Reset position if panel re-opens (node changes)
+  useEffect(() => { setPos(defaultPos()); }, [node.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const onDragHandlePointerDown = (e: React.PointerEvent) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragOffsetRef.current = { dx: e.clientX - pos.x, dy: e.clientY - pos.y };
+  };
+  const onDragHandlePointerMove = (e: React.PointerEvent) => {
+    if (!dragOffsetRef.current) return;
+    const x = Math.max(0, Math.min(window.innerWidth - PANEL_W, e.clientX - dragOffsetRef.current.dx));
+    const y = Math.max(0, Math.min(window.innerHeight - 120, e.clientY - dragOffsetRef.current.dy));
+    setPos({ x, y });
+  };
+  const onDragHandlePointerUp = () => { dragOffsetRef.current = null; };
+
   const onUpdateWithFeedback = useCallback((updates: Partial<SceneNode>) => {
     onUpdate(updates);
     setSavedFlash(true);
@@ -42,30 +66,40 @@ export function PropertiesPanel({ node, sceneCatalog, currentSceneId, onUpdate, 
   };
 
   return (
-    <div className="fixed right-0 top-12 bottom-0 w-full sm:w-64 bg-ink/95 border-l border-white/10 text-white text-xs overflow-y-auto z-10 flex flex-col">
+    <div
+      className="fixed bg-ink/95 border border-white/15 text-white text-xs z-20 flex flex-col rounded-xl shadow-2xl overflow-hidden"
+      style={{ left: pos.x, top: pos.y, width: PANEL_W, maxHeight: 'calc(100vh - 80px)' }}
+    >
+      {/* Drag handle */}
+      <div
+        className="flex items-center justify-between px-3 py-2 border-b border-white/10 flex-shrink-0 select-none touch-none"
+        style={{ cursor: dragOffsetRef.current ? 'grabbing' : 'grab' }}
+        onPointerDown={onDragHandlePointerDown}
+        onPointerMove={onDragHandlePointerMove}
+        onPointerUp={onDragHandlePointerUp}
+      >
+        <span className="text-gray-500 text-[10px]">⠿ Propriétés</span>
+        <div className="flex items-center gap-1">
+          {savedFlash && <span className="text-green-400 text-[10px] font-medium animate-pulse">✓</span>}
+          {onClose && (
+            <button onClick={onClose} className="text-gray-500 hover:text-white active:text-white transition-colors text-xs px-1">✕</button>
+          )}
+        </div>
+      </div>
+      {/* Tabs */}
       <div className="flex items-center border-b border-white/10 flex-shrink-0">
-        {savedFlash && (
-          <span className="ml-2 text-green-400 text-[10px] font-medium animate-pulse flex-shrink-0">✓</span>
-        )}
         {tabs.map(tab => (
           <button
             key={tab}
-            className={`flex-1 py-3 sm:py-2 text-xs sm:text-[10px] uppercase tracking-wide transition-colors touch-manipulation ${activeTab === tab ? 'text-accent border-b-2 border-accent' : 'text-gray-500 active:text-white hover:text-white'}`}
+            className={`flex-1 py-2 text-[10px] uppercase tracking-wide transition-colors touch-manipulation ${activeTab === tab ? 'text-accent border-b-2 border-accent' : 'text-gray-500 active:text-white hover:text-white'}`}
             onClick={() => setActiveTab(tab)}
           >
             {tabIcon[tab]}
           </button>
         ))}
-        {onClose && (
-          <button
-            onClick={onClose}
-            className="px-3 py-3 sm:py-2 text-gray-500 active:text-white hover:text-white transition-colors touch-manipulation flex-shrink-0"
-            title="Close"
-          >✕</button>
-        )}
       </div>
 
-      <div className="flex-1 p-3 flex flex-col gap-3">
+      <div className="overflow-y-auto p-3 flex flex-col gap-3" style={{ maxHeight: 'calc(100vh - 160px)' }}>
         {activeTab === 'text' && isText && (
           <TextEditor node={node} onUpdate={onUpdateWithFeedback} />
         )}
