@@ -745,7 +745,7 @@ function drawImageLOD(ctx: CanvasRenderingContext2D, node: SceneNode, viewportSc
   if (vectorAlpha > 0 && lod?.colorLayers) {
     const outerAlpha = ctx.globalAlpha;
     ctx.save();
-    ctx.globalAlpha = outerAlpha * vectorAlpha * 0.85;
+    ctx.globalAlpha = outerAlpha * vectorAlpha * 0.40;
     ctx.transform(node.width / lod.sourceW, 0, 0, node.height / lod.sourceH, node.x, node.y);
     for (const layer of lod.colorLayers) {
       ctx.fillStyle = layer.color;
