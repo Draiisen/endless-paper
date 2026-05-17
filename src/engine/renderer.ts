@@ -726,18 +726,16 @@ function drawImageLOD(ctx: CanvasRenderingContext2D, node: SceneNode, viewportSc
     vectorAlpha *= Math.min(1, (Date.now() - lod.vectorLoadedAt) / 800);
   }
 
-  // ── Raster: min 5% alpha so vector coverage gaps don't show as holes ───────
+  // ── Raster always at full opacity — never removed, fills gaps vectors miss ──
   if (node.imageData) {
-    const outerAlpha = ctx.globalAlpha;
-    ctx.globalAlpha = outerAlpha * Math.max(0.05, 1 - vectorAlpha);
     drawImage(ctx, node);
-    ctx.globalAlpha = outerAlpha;
   }
 
-  // ── Vector layer fades in over raster as zoom increases ───────────────────
+  // ── Vector layer overlaid on top of raster as zoom increases ─────────────
+  // Vectors sharpen edges; raster underneath ensures no area is ever blank.
   if (vectorAlpha > 0 && lod?.colorLayers) {
     const outerAlpha = ctx.globalAlpha;
-    ctx.globalAlpha = outerAlpha * vectorAlpha;
+    ctx.globalAlpha = outerAlpha * vectorAlpha * 0.92;
     ctx.save();
     ctx.transform(
       node.width / lod.sourceW, 0,
