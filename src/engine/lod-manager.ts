@@ -15,7 +15,7 @@ export function generateThumbnail(img: HTMLImageElement): string {
 // ── Pixel extraction ──────────────────────────────────────────────────────────
 
 /** Downscale to at most MAX_DIM before sending to the worker. */
-const MAX_DIM = 1200;
+const MAX_DIM = 1400;
 
 function extractPixels(img: HTMLImageElement): { buffer: ArrayBuffer; w: number; h: number } {
   const aspect = img.naturalWidth / Math.max(1, img.naturalHeight);
