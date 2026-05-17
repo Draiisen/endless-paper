@@ -729,7 +729,11 @@ function drawImageLOD(ctx: CanvasRenderingContext2D, node: SceneNode, viewportSc
   const nw = lod?.naturalW ?? 0;
   const hasVectors = !!(lod?.colorLayers && lod.colorLayers.length > 0 && lod.sourceW > 0 && nw > 0);
   const ratio = hasVectors && node.width > 0 ? (nw / node.width) * viewportScale : 0;
+  // Vectors fade in at ratio 1.5→3.0 and fade out at ratio 3.0→8.0
+  // Above ratio 8 the raster is shown alone — flat vector fills cannot
+  // represent fine photo gradients at extreme zoom.
   let vectorAlpha = hasVectors ? Math.min(1, Math.max(0, (ratio - 1.5) / 1.5)) : 0;
+  if (vectorAlpha > 0 && ratio > 3) vectorAlpha *= Math.max(0, 1 - (ratio - 3) / 5);
   if (vectorAlpha > 0 && lod?.vectorLoadedAt) {
     vectorAlpha *= Math.min(1, (Date.now() - lod.vectorLoadedAt) / 800);
   }
