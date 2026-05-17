@@ -734,13 +734,14 @@ function drawImageLOD(ctx: CanvasRenderingContext2D, node: SceneNode, viewportSc
     vectorAlpha *= Math.min(1, (Date.now() - lod.vectorLoadedAt) / 800);
   }
 
-  // ── Raster always at full opacity — never hidden ──────────────────────────
+  // ── Raster base layer ────────────────────────────────────────────────────
   if (node.imageData) drawImage(ctx, node);
 
-  // ── imagetracerjs vectors overlaid on top — crisp bezier edges ───────────
+  // ── imagetracerjs vectors overlaid — crisp bezier edges ──────────────────
   if (vectorAlpha > 0 && lod?.colorLayers) {
     const outerAlpha = ctx.globalAlpha;
-    ctx.globalAlpha = outerAlpha * vectorAlpha;
+    // Vectors at 80% max so raster always slightly bleeds through
+    ctx.globalAlpha = outerAlpha * vectorAlpha * 0.80;
     ctx.save();
     ctx.transform(node.width / lod.sourceW, 0, 0, node.height / lod.sourceH, node.x, node.y);
     for (const layer of lod.colorLayers) {
@@ -748,6 +749,9 @@ function drawImageLOD(ctx: CanvasRenderingContext2D, node: SceneNode, viewportSc
       for (const vp of layer.paths) ctx.fill(getPath2D(vp.d));
     }
     ctx.restore();
+    // Raster texture overlay on top to restore photo detail
+    ctx.globalAlpha = outerAlpha * vectorAlpha * 0.30;
+    if (node.imageData) drawImage(ctx, node);
     ctx.globalAlpha = outerAlpha;
   }
 }
