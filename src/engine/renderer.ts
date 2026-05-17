@@ -690,13 +690,15 @@ function drawVectorPath(ctx: CanvasRenderingContext2D, vp: VectorPath): void {
 export const imageCache = new LRUImageCache(50);
 
 /**
- * LOD rendering:
- *   screenW < 70px        → thumbnail
- *   ratio 1.5 → 3.0       → raster (full) + imagetracerjs vectors fade in on top
- *   ratio > 3.0           → raster (full) + vectors at full opacity
+ * LOD selection:
+ *   screenW < 70px        → thumbnail (fast preview at low zoom)
+ *   ratio in [1.5, 2.5]   → smooth cross-fade raster → vector
+ *   ratio > 2.5           → pure vector (infinite resolution)
+ *   otherwise             → raster original
  *
- * Raster is ALWAYS drawn first at full opacity so no area is ever blank.
- * Vectors are overlaid on top to provide crisp bezier edges at high zoom.
+ * ratio = (naturalW / node.width) * viewportScale
+ * > 1 means the display pixel is smaller than a source pixel (zoomed past native res).
+ * Blend starts at 1.5 (well past native) to keep raster dominant at moderate zoom.
  */
 function drawImageLOD(ctx: CanvasRenderingContext2D, node: SceneNode, viewportScale: number): void {
   const screenW = node.width * viewportScale;
@@ -710,27 +712,41 @@ function drawImageLOD(ctx: CanvasRenderingContext2D, node: SceneNode, viewportSc
     }
   }
 
+  // ── Blend factor: raster → vector as zoom increases past native resolution ─
   const lod = node.lod;
   const nw = lod?.naturalW ?? 0;
-  const hasVectors = !!(lod?.colorLayers && lod.colorLayers.length > 0 && lod.sourceW > 0 && nw > 0);
+  const hasVectors = !!(lod?.colorLayers && lod.colorLayers.length > 0 &&
+    lod.sourceW > 0 && lod.sourceH > 0 && nw > 0);
   const ratio = hasVectors && node.width > 0 ? (nw / node.width) * viewportScale : 0;
+  // Blend zone 1.5 → 3.0: start replacing raster only when well past native res
   let vectorAlpha = hasVectors ? Math.min(1, Math.max(0, (ratio - 1.5) / 1.5)) : 0;
+
+  // Fade-in when vectors just finished loading (800 ms transition)
   if (vectorAlpha > 0 && lod?.vectorLoadedAt) {
     vectorAlpha *= Math.min(1, (Date.now() - lod.vectorLoadedAt) / 800);
   }
 
-  // ── Raster always at full opacity — never hidden ──────────────────────────
-  if (node.imageData) drawImage(ctx, node);
+  // ── Raster always at full opacity — never removed, fills gaps vectors miss ──
+  if (node.imageData) {
+    drawImage(ctx, node);
+  }
 
-  // ── imagetracerjs vectors overlaid on top — crisp bezier edges ───────────
+  // ── Vector layer overlaid on top of raster as zoom increases ─────────────
+  // Vectors sharpen edges; raster underneath ensures no area is ever blank.
   if (vectorAlpha > 0 && lod?.colorLayers) {
     const outerAlpha = ctx.globalAlpha;
-    ctx.globalAlpha = outerAlpha * vectorAlpha;
+    ctx.globalAlpha = outerAlpha * vectorAlpha * 0.92;
     ctx.save();
-    ctx.transform(node.width / lod.sourceW, 0, 0, node.height / lod.sourceH, node.x, node.y);
+    ctx.transform(
+      node.width / lod.sourceW, 0,
+      0, node.height / lod.sourceH,
+      node.x, node.y,
+    );
     for (const layer of lod.colorLayers) {
       ctx.fillStyle = layer.color;
-      for (const vp of layer.paths) ctx.fill(getPath2D(vp.d));
+      for (const vp of layer.paths) {
+        ctx.fill(getPath2D(vp.d));
+      }
     }
     ctx.restore();
     ctx.globalAlpha = outerAlpha;

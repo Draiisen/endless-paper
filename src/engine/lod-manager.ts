@@ -32,7 +32,7 @@ function extractPixels(img: HTMLImageElement): { buffer: ArrayBuffer; w: number;
 
 interface WorkerOutput {
   nodeId: string;
-  layers: Array<{ r: number; g: number; b: number; a: number; paths: string[] }>;
+  layers: Array<{ r: number; g: number; b: number; paths: string[] }>;
   sourceW: number;
   sourceH: number;
 }
@@ -66,12 +66,10 @@ export function requestColorVectorization(
     // Build ColorLayers keeping paths in source-pixel space.
     // The renderer will apply a canvas transform to map them to world coords.
     const colorLayers: ColorLayer[] = layers.map(layer => {
-      const color = layer.a < 255
-        ? `rgba(${layer.r},${layer.g},${layer.b},${(layer.a/255).toFixed(3)})`
-        : `rgb(${layer.r},${layer.g},${layer.b})`;
+      const color = `rgb(${layer.r},${layer.g},${layer.b})`;
       const paths: VectorPath[] = layer.paths.map(d => ({
         id: generateId(),
-        d,
+        d,               // ← source-pixel coords, NOT world-space
         fill: color,
         stroke: 'none',
         strokeWidth: 0,
