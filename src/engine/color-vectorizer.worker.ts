@@ -9,7 +9,7 @@ interface WorkerInput {
   pixels: ArrayBuffer; // RGBA, row-major
   width: number;
   height: number;
-  numColors: number;   // K for k-means (default 8)
+  numColors: number;   // K for k-means (default 10)
 }
 
 interface LayerData {
@@ -32,7 +32,7 @@ function kMeans(
   data: Uint8ClampedArray,
   pixelCount: number,
   k: number,
-  iterations = 14,
+  iterations = 16,
 ): { centroids: RGB[]; assignments: Uint8Array } {
   // Collect opaque pixels (subsample every 3rd pixel for speed)
   const sample: RGB[] = [];
@@ -105,6 +105,48 @@ function kMeans(
   }
 
   return { centroids, assignments };
+}
+
+// ── Box blur (3-pass approximation of Gaussian) ───────────────────────────────
+// Blurring the binary mask before edge detection is the key to smooth contours.
+// Without this, every contour has staircase artifacts at pixel boundaries.
+// Three passes of a 1D box filter approximate a Gaussian kernel well.
+
+function smoothMask(mask: Uint8Array, w: number, h: number, radius = 2): Uint8Array {
+  let curr = new Float32Array(w * h);
+  for (let i = 0; i < mask.length; i++) curr[i] = mask[i];
+
+  const temp = new Float32Array(w * h);
+
+  for (let pass = 0; pass < 3; pass++) {
+    // Horizontal
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let sum = 0, n = 0;
+        for (let dx = -radius; dx <= radius; dx++) {
+          const nx = x + dx;
+          if (nx >= 0 && nx < w) { sum += curr[y * w + nx]; n++; }
+        }
+        temp[y * w + x] = sum / n;
+      }
+    }
+    // Vertical
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let sum = 0, n = 0;
+        for (let dy = -radius; dy <= radius; dy++) {
+          const ny = y + dy;
+          if (ny >= 0 && ny < h) { sum += temp[ny * w + x]; n++; }
+        }
+        curr[y * w + x] = sum / n;
+      }
+    }
+  }
+
+  // Threshold: slightly below 0.5 to keep coverage (compensates for blur shrinkage)
+  const out = new Uint8Array(w * h);
+  for (let i = 0; i < out.length; i++) out[i] = curr[i] >= 0.38 ? 1 : 0;
+  return out;
 }
 
 // ── Edge detection ────────────────────────────────────────────────────────────
@@ -192,16 +234,15 @@ function rdp(pts: Pt[], tol: number): Pt[] {
   return [s, e];
 }
 
-// ── Points → smooth SVG path ──────────────────────────────────────────────────
+// ── Points → smooth SVG path (Catmull-Rom → cubic bezier) ────────────────────
 
 function ptsToPath(pts: Pt[]): string {
   if (pts.length < 2) return '';
-  let d = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`;
+  let d = `M ${pts[0].x.toFixed(2)} ${pts[0].y.toFixed(2)}`;
   if (pts.length < 4) {
-    for (let i = 1; i < pts.length; i++) d += ` L ${pts[i].x.toFixed(1)} ${pts[i].y.toFixed(1)}`;
+    for (let i = 1; i < pts.length; i++) d += ` L ${pts[i].x.toFixed(2)} ${pts[i].y.toFixed(2)}`;
     return d + ' Z';
   }
-  // Catmull-Rom → cubic bezier
   for (let i = 1; i < pts.length - 2; i++) {
     const p0 = pts[Math.max(0, i - 1)];
     const p1 = pts[i];
@@ -211,7 +252,7 @@ function ptsToPath(pts: Pt[]): string {
     const cp1y = p1.y + (p2.y - p0.y) / 6;
     const cp2x = p2.x - (p3.x - p1.x) / 6;
     const cp2y = p2.y - (p3.y - p1.y) / 6;
-    d += ` C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)}, ${cp2x.toFixed(1)} ${cp2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`;
+    d += ` C ${cp1x.toFixed(2)} ${cp1y.toFixed(2)}, ${cp2x.toFixed(2)} ${cp2y.toFixed(2)}, ${p2.x.toFixed(2)} ${p2.y.toFixed(2)}`;
   }
   return d + ' Z';
 }
@@ -221,7 +262,9 @@ function ptsToPath(pts: Pt[]): string {
 function traceCluster(
   mask: Uint8Array, w: number, h: number, tol: number,
 ): string[] {
-  const edges = buildEdgeGrid(mask, w, h);
+  // Smooth the mask before edge detection — this is what eliminates staircase artifacts
+  const smoothed = smoothMask(mask, w, h, 2);
+  const edges = buildEdgeGrid(smoothed, w, h);
   const visited = new Uint8Array(w * h);
   const paths: string[] = [];
 
@@ -238,25 +281,6 @@ function traceCluster(
     }
   }
   return paths;
-}
-
-// ── Dilate mask to reduce gaps at boundaries ──────────────────────────────────
-
-function dilate(mask: Uint8Array, w: number, h: number): Uint8Array {
-  const out = new Uint8Array(w * h);
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const i = y * w + x;
-      if (mask[i] ||
-        (x > 0 && mask[i - 1]) ||
-        (x < w - 1 && mask[i + 1]) ||
-        (y > 0 && mask[i - w]) ||
-        (y < h - 1 && mask[i + w])) {
-        out[i] = 1;
-      }
-    }
-  }
-  return out;
 }
 
 // ── Count pixels per cluster ──────────────────────────────────────────────────
@@ -278,8 +302,9 @@ function process(
   const { centroids, assignments } = kMeans(data, n, k);
   if (centroids.length === 0) return [];
 
-  const minPixels = Math.max(50, n * 0.005); // skip tiny clusters (< 0.5% of image)
-  const simplifyTol = Math.max(1.5, Math.min(w, h) / 100);
+  const minPixels = Math.max(30, n * 0.003); // skip tiny clusters (< 0.3% of image)
+  // Much finer simplification tolerance — blur already smooths the path, don't over-simplify
+  const simplifyTol = Math.max(0.6, Math.min(w, h) / 350);
 
   const layers: Array<LayerData & { pixelCount: number }> = [];
 
@@ -287,18 +312,14 @@ function process(
     const pixelCount = countPixels(assignments, c, n);
     if (pixelCount < minPixels) continue;
 
-    // Build mask for this cluster
     const mask = new Uint8Array(n);
     for (let i = 0; i < n; i++) {
       if (data[i * 4 + 3] >= 128 && assignments[i] === c) mask[i] = 1;
     }
 
-    // Dilate once to fill single-pixel gaps
-    const dilated = dilate(mask, w, h);
-    const paths = traceCluster(dilated, w, h, simplifyTol);
+    const paths = traceCluster(mask, w, h, simplifyTol);
 
-    // Limit paths per cluster to avoid huge SVG
-    const trimmed = paths.slice(0, 80);
+    const trimmed = paths.slice(0, 120);
     if (trimmed.length === 0) continue;
 
     layers.push({ r: centroids[c][0], g: centroids[c][1], b: centroids[c][2], paths: trimmed, pixelCount });
@@ -316,12 +337,11 @@ self.onmessage = (e: MessageEvent<WorkerInput>) => {
   const { nodeId, pixels, width, height, numColors } = e.data;
   try {
     const data = new Uint8ClampedArray(pixels);
-    // Guard: buffer must hold width×height RGBA pixels, else bail (no OOB reads).
     if (width < 1 || height < 1 || data.length < width * height * 4) {
       (self as unknown as Worker).postMessage({ nodeId, layers: [], sourceW: width, sourceH: height });
       return;
     }
-    const layers = process(data, width, height, numColors ?? 8);
+    const layers = process(data, width, height, numColors ?? 10);
     const output: WorkerOutput = { nodeId, layers, sourceW: width, sourceH: height };
     (self as unknown as Worker).postMessage(output);
   } catch {

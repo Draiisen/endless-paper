@@ -691,11 +691,14 @@ export const imageCache = new LRUImageCache(50);
 
 /**
  * LOD selection:
- *   screenW < 70px → thumbnail (fast preview at low zoom)
- *   otherwise      → raster original (faithful at all zoom levels)
+ *   screenW < 70px        → thumbnail (fast preview at low zoom)
+ *   ratio in [1.5, 2.5]   → smooth cross-fade raster → vector
+ *   ratio > 2.5           → pure vector (infinite resolution)
+ *   otherwise             → raster original
  *
- * Color vector layers are intentionally disabled — the auto-vectorization
- * produces jagged polygon artifacts that look worse than a pixelated raster.
+ * ratio = (naturalW / node.width) * viewportScale
+ * > 1 means the display pixel is smaller than a source pixel (zoomed past native res).
+ * Blend starts at 1.5 (well past native) to keep raster dominant at moderate zoom.
  */
 function drawImageLOD(ctx: CanvasRenderingContext2D, node: SceneNode, viewportScale: number): void {
   const screenW = node.width * viewportScale;
@@ -709,9 +712,46 @@ function drawImageLOD(ctx: CanvasRenderingContext2D, node: SceneNode, viewportSc
     }
   }
 
-  // ── Always use raster ─────────────────────────────────────────────────────
+  // ── Blend factor: raster → vector as zoom increases past native resolution ─
+  const lod = node.lod;
+  const nw = lod?.naturalW ?? 0;
+  const hasVectors = !!(lod?.colorLayers && lod.colorLayers.length > 0 &&
+    lod.sourceW > 0 && lod.sourceH > 0 && nw > 0);
+  const ratio = hasVectors && node.width > 0 ? (nw / node.width) * viewportScale : 0;
+  // Blend zone 1.5 → 3.0: start replacing raster only when well past native res
+  let vectorAlpha = hasVectors ? Math.min(1, Math.max(0, (ratio - 1.5) / 1.5)) : 0;
+
+  // Fade-in when vectors just finished loading (800 ms transition)
+  if (vectorAlpha > 0 && lod?.vectorLoadedAt) {
+    vectorAlpha *= Math.min(1, (Date.now() - lod.vectorLoadedAt) / 800);
+  }
+
+  // ── Raster: min 5% alpha so vector coverage gaps don't show as holes ───────
   if (node.imageData) {
+    const outerAlpha = ctx.globalAlpha;
+    ctx.globalAlpha = outerAlpha * Math.max(0.05, 1 - vectorAlpha);
     drawImage(ctx, node);
+    ctx.globalAlpha = outerAlpha;
+  }
+
+  // ── Vector layer fades in over raster as zoom increases ───────────────────
+  if (vectorAlpha > 0 && lod?.colorLayers) {
+    const outerAlpha = ctx.globalAlpha;
+    ctx.globalAlpha = outerAlpha * vectorAlpha;
+    ctx.save();
+    ctx.transform(
+      node.width / lod.sourceW, 0,
+      0, node.height / lod.sourceH,
+      node.x, node.y,
+    );
+    for (const layer of lod.colorLayers) {
+      ctx.fillStyle = layer.color;
+      for (const vp of layer.paths) {
+        ctx.fill(getPath2D(vp.d));
+      }
+    }
+    ctx.restore();
+    ctx.globalAlpha = outerAlpha;
   }
 }
 

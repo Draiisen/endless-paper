@@ -15,7 +15,7 @@ export function generateThumbnail(img: HTMLImageElement): string {
 // ── Pixel extraction ──────────────────────────────────────────────────────────
 
 /** Downscale to at most MAX_DIM before sending to the worker. */
-const MAX_DIM = 480;
+const MAX_DIM = 700;
 
 function extractPixels(img: HTMLImageElement): { buffer: ArrayBuffer; w: number; h: number } {
   const aspect = img.naturalWidth / Math.max(1, img.naturalHeight);
@@ -89,7 +89,7 @@ export function requestColorVectorization(
   };
 
   worker.postMessage(
-    { nodeId: node.id, pixels: buffer, width: w, height: h, numColors },
+    { nodeId: node.id, pixels: buffer, width: w, height: h, numColors: numColors ?? 10 },
     [buffer],
   );
 
