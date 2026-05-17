@@ -52,7 +52,7 @@ function segmentsToPath(segments: Segment[]): string {
 function process(
   data: Uint8ClampedArray,
   w: number, h: number,
-  _numColors: number,
+  numColors: number,
 ): LayerData[] {
   const imgData = { data, width: w, height: h };
 
