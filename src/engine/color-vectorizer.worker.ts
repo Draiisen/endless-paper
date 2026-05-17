@@ -45,6 +45,58 @@ function segmentsToPath(segments: Segment[]): string {
   return d + ' Z';
 }
 
+// ── Accurate color: rasterise paths at low-res, average raster pixels inside ──
+// imagetracerjs palette drifts (blue→green etc). OffscreenCanvas lets us
+// rasterise the exact path mask and sample the original pixels inside it.
+
+const SAMPLE_RES = 160;
+
+function computeLayerColor(
+  rasterData: Uint8ClampedArray,
+  rasterW: number,
+  rasterH: number,
+  pathStrings: string[],
+  fallbackR: number, fallbackG: number, fallbackB: number,
+): { r: number; g: number; b: number } {
+  try {
+    const scale = SAMPLE_RES / Math.max(rasterW, rasterH);
+    const sw = Math.max(1, Math.round(rasterW * scale));
+    const sh = Math.max(1, Math.round(rasterH * scale));
+
+    // Rasterise paths into a mask at reduced resolution
+    const oc = new OffscreenCanvas(sw, sh);
+    const octx = oc.getContext('2d')!;
+    octx.scale(scale, scale);
+    octx.fillStyle = 'white';
+    for (const d of pathStrings) {
+      octx.fill(new Path2D(d));
+    }
+    const mask = octx.getImageData(0, 0, sw, sh).data;
+
+    // Average the original raster pixels that fall inside the mask
+    let r = 0, g = 0, b = 0, count = 0;
+    for (let py = 0; py < sh; py++) {
+      for (let px = 0; px < sw; px++) {
+        if (mask[(py * sw + px) * 4] < 128) continue; // outside path
+        const rx = Math.min(rasterW - 1, Math.round(px / scale));
+        const ry = Math.min(rasterH - 1, Math.round(py / scale));
+        const ri = (ry * rasterW + rx) * 4;
+        r += rasterData[ri];
+        g += rasterData[ri + 1];
+        b += rasterData[ri + 2];
+        count++;
+      }
+    }
+
+    if (count === 0) return { r: fallbackR, g: fallbackG, b: fallbackB };
+    return { r: Math.round(r / count), g: Math.round(g / count), b: Math.round(b / count) };
+  } catch {
+    return { r: fallbackR, g: fallbackG, b: fallbackB };
+  }
+}
+
+// ── Main processing ───────────────────────────────────────────────────────────
+
 function process(data: Uint8ClampedArray, w: number, h: number): LayerData[] {
   const imgData = { data, width: w, height: h };
 
@@ -74,11 +126,16 @@ function process(data: Uint8ClampedArray, w: number, h: number): LayerData[] {
     }
 
     if (paths.length === 0) continue;
-    layers.push({ r: color.r, g: color.g, b: color.b, a: color.a, paths });
+
+    // Sample actual raster color inside the rasterised path mask
+    const { r, g, b } = computeLayerColor(data, w, h, paths, color.r, color.g, color.b);
+    layers.push({ r, g, b, a: color.a, paths });
   }
 
   return layers;
 }
+
+// ── Worker entry point ────────────────────────────────────────────────────────
 
 self.onmessage = (e: MessageEvent<WorkerInput>) => {
   const { nodeId, pixels, width, height } = e.data;
