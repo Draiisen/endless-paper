@@ -578,7 +578,22 @@ function drawPortalOutline(ctx: CanvasRenderingContext2D, node: SceneNode, scale
   ctx.strokeStyle = '#9d4edd';
   ctx.lineWidth = 2 / scale;
   ctx.setLineDash([6 / scale, 4 / scale]);
-  ctx.strokeRect(node.x - 2 / scale, node.y - 2 / scale, node.width + 4 / scale, node.height + 4 / scale);
+  const pad = 2 / scale;
+  if (node.type === 'circle') {
+    ctx.beginPath();
+    ctx.ellipse(
+      node.x + node.width / 2,
+      node.y + node.height / 2,
+      node.width / 2 + pad,
+      node.height / 2 + pad,
+      0, 0, Math.PI * 2,
+    );
+    ctx.stroke();
+  } else if (node.type === 'path' && node.path) {
+    ctx.stroke(getPath2D(node.path.d));
+  } else {
+    ctx.strokeRect(node.x - pad, node.y - pad, node.width + pad * 2, node.height + pad * 2);
+  }
   ctx.setLineDash([]);
   // Portal icon in top-left
   const r = 8 / scale;
