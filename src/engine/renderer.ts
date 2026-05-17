@@ -729,7 +729,10 @@ function drawImageLOD(ctx: CanvasRenderingContext2D, node: SceneNode, viewportSc
   const nw = lod?.naturalW ?? 0;
   const hasVectors = !!(lod?.colorLayers && lod.colorLayers.length > 0 && lod.sourceW > 0 && nw > 0);
   const ratio = hasVectors && node.width > 0 ? (nw / node.width) * viewportScale : 0;
+  // Fade in 0→1 between ratio 1.5 and 3.0, then fade back out above ratio 6
+  // so extreme zoom shows the raster (palette drift becomes visible otherwise)
   let vectorAlpha = hasVectors ? Math.min(1, Math.max(0, (ratio - 1.5) / 1.5)) : 0;
+  if (vectorAlpha > 0 && ratio > 6) vectorAlpha *= Math.max(0.25, 1 - (ratio - 6) / 8);
   if (vectorAlpha > 0 && lod?.vectorLoadedAt) {
     vectorAlpha *= Math.min(1, (Date.now() - lod.vectorLoadedAt) / 800);
   }
