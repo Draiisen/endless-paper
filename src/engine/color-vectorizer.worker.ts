@@ -63,13 +63,13 @@ function process(
   // - colorsampling 2: deterministic palette sampling
   // - numberofcolors: from caller (default 16)
   const options = {
-    numberofcolors: numColors,
+    numberofcolors: 20,
     colorsampling: 2,
     blurradius: 1,
     blurdelta: 20,
     ltres: 0.5,
     qtres: 0.5,
-    pathomit: 4,
+    pathomit: 3,
     rightangleenhance: true,
   };
 
