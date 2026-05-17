@@ -737,7 +737,8 @@ function drawImageLOD(ctx: CanvasRenderingContext2D, node: SceneNode, viewportSc
   const ratio = (nw / node.width) * viewportScale;
   if (ratio < 1.5) return;
 
-  const vectorAlpha = Math.min(1, (ratio - 1.5) / 1.5);
+  // Cap at 0.85 so 15% raster always shows through for fine details (eyes, etc.)
+  const vectorAlpha = Math.min(0.85, (ratio - 1.5) / 1.5);
   const sourceW = node.lod!.sourceW;
   const sourceH = node.lod!.sourceH;
   if (!sourceW || !sourceH) return;

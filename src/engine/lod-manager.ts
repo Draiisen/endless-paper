@@ -96,7 +96,7 @@ export function requestColorVectorization(
   };
 
   worker.postMessage(
-    { nodeId: node.id, pixels: buffer, width: w, height: h, numColors: numColors ?? 10 },
+    { nodeId: node.id, pixels: buffer, width: w, height: h, numColors: numColors ?? 32 },
     [buffer],
   );
 
