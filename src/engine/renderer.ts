@@ -707,11 +707,12 @@ export const imageCache = new LRUImageCache(50);
 /**
  * LOD rendering:
  *   screenW < 70px        → thumbnail
- *   ratio 1.5 → 3.0       → raster (full) + imagetracerjs vectors fade in on top
- *   ratio > 3.0           → raster (full) + vectors at full opacity
+ *   ratio 0 → 1.5         → raster with smoothing (normal display)
+ *   ratio 1.5 → 3.0       → raster + vectors fade in (exact colors from median-cut palette)
+ *   ratio > 3.0           → raster + vectors at full opacity (crisp at any zoom)
  *
- * Raster is ALWAYS drawn first at full opacity so no area is ever blank.
- * Vectors are overlaid on top to provide crisp bezier edges at high zoom.
+ * Raster is ALWAYS drawn first so no area is ever blank.
+ * Vectors use exact colors (no palette drift) and scale infinitely.
  */
 function drawImageLOD(ctx: CanvasRenderingContext2D, node: SceneNode, viewportScale: number): void {
   const screenW = node.width * viewportScale;
@@ -725,34 +726,37 @@ function drawImageLOD(ctx: CanvasRenderingContext2D, node: SceneNode, viewportSc
     }
   }
 
-  const lod = node.lod;
-  const nw = lod?.naturalW ?? 0;
-  const hasVectors = !!(lod?.colorLayers && lod.colorLayers.length > 0 && lod.sourceW > 0 && nw > 0);
-  const ratio = hasVectors && node.width > 0 ? (nw / node.width) * viewportScale : 0;
-  // Vectors fade in at ratio 1.5→3.0 and fade out at ratio 3.0→8.0
-  // Above ratio 8 the raster is shown alone — flat vector fills cannot
-  // represent fine photo gradients at extreme zoom.
-  let vectorAlpha = hasVectors ? Math.min(1, Math.max(0, (ratio - 1.5) / 1.5)) : 0;
-  if (vectorAlpha > 0 && ratio > 3) vectorAlpha *= Math.max(0, 1 - (ratio - 3) / 5);
-  if (vectorAlpha > 0 && lod?.vectorLoadedAt) {
-    vectorAlpha *= Math.min(1, (Date.now() - lod.vectorLoadedAt) / 800);
-  }
-
-  // ── Raster base layer ────────────────────────────────────────────────────
+  // ── Raster base layer ─────────────────────────────────────────────────────
   if (node.imageData) drawImage(ctx, node);
 
-  // ── imagetracerjs vectors — colors sampled from raster, shapes from tracer ─
-  if (vectorAlpha > 0 && lod?.colorLayers) {
-    const outerAlpha = ctx.globalAlpha;
-    ctx.save();
-    ctx.globalAlpha = outerAlpha * vectorAlpha * 0.40;
-    ctx.transform(node.width / lod.sourceW, 0, 0, node.height / lod.sourceH, node.x, node.y);
-    for (const layer of lod.colorLayers) {
-      ctx.fillStyle = layer.color;
-      for (const vp of layer.paths) ctx.fill(getPath2D(vp.d));
+  // ── Vector overlay at high zoom ───────────────────────────────────────────
+  const nw = node.lod?.naturalW ?? 0;
+  const colorLayers = node.lod?.colorLayers;
+  if (!colorLayers || colorLayers.length === 0 || nw === 0 || node.width === 0) return;
+
+  const ratio = (nw / node.width) * viewportScale;
+  if (ratio < 1.5) return;
+
+  const vectorAlpha = Math.min(1, (ratio - 1.5) / 1.5);
+  const sourceW = node.lod!.sourceW;
+  const sourceH = node.lod!.sourceH;
+  if (!sourceW || !sourceH) return;
+
+  const scaleX = node.width / sourceW;
+  const scaleY = node.height / sourceH;
+
+  ctx.save();
+  ctx.globalAlpha = vectorAlpha;
+  ctx.transform(scaleX, 0, 0, scaleY, node.x, node.y);
+
+  for (const layer of colorLayers) {
+    ctx.fillStyle = layer.color;
+    for (const vp of layer.paths) {
+      ctx.fill(getPath2D(vp.d));
     }
-    ctx.restore();
   }
+
+  ctx.restore();
 }
 
 function drawImage(ctx: CanvasRenderingContext2D, node: SceneNode): void {
