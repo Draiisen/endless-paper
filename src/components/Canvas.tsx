@@ -450,8 +450,11 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
 
     const doEnter = () => {
       const updatedNode = ensureInnerScene(node);
-      const updatedScene = updateNode(sceneRef.current, node.id, { innerScene: updatedNode.innerScene });
       const stack = sceneStackRef.current;
+      // Use the scene stored in the stack (kept in sync by handleSceneChange) rather
+      // than the local sceneRef which may lag one render behind.
+      const latestScene = stack[stack.length - 1]?.scene ?? sceneRef.current;
+      const updatedScene = updateNode(latestScene, node.id, { innerScene: updatedNode.innerScene });
 
       // Compute lens transform (same math as drawLens in renderer)
       const lt = computeLensTransform(node, updatedNode.innerScene!);

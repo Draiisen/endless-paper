@@ -352,9 +352,30 @@ export default function App({ initialState, settings }: AppProps) {
       i === stack.length - 1 ? { ...entry, viewportWhenLeft: viewport } : entry
     );
     const targetEntry = updatedStack[index];
+
+    // When going back one level, compute the parent viewport from the inverse lens
+    // transform (same math as seamless auto-exit). This ensures the parent scene
+    // is shown at the position matching what was visible in the inner scene, rather
+    // than restoring the (potentially very zoomed-in) viewport from auto-enter time.
+    let restoredViewport = targetEntry.viewportWhenLeft;
+    if (index === stack.length - 2) {
+      const innerEntry = stack[stack.length - 1];
+      const lt = innerEntry.lensTransform;
+      if (lt) {
+        const vp2 = viewport;
+        const parentScale = vp2.scale / lt.s;
+        restoredViewport = {
+          scale: parentScale,
+          x: vp2.x - lt.ox * parentScale,
+          y: vp2.y - lt.oy * parentScale,
+        };
+      }
+    }
+
+    const finalViewport = restoredViewport;
     const finishNav = () => {
       setScene(targetEntry.scene);
-      setViewport(targetEntry.viewportWhenLeft);
+      setViewport(finalViewport);
       setSceneStack(updatedStack.slice(0, index + 1));
       setSelectedNodeIds(new Set());
     };
