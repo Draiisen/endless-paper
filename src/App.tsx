@@ -1622,7 +1622,7 @@ export default function App({ initialState, settings }: AppProps) {
 
       {/* Unified selection action bar */}
       {hasSelection && !viewerMode && (
-        <div className="fixed left-1/2 -translate-x-1/2 z-20 flex items-center gap-0.5 px-2 py-1.5 bg-ink/95 backdrop-blur-sm border border-white/10 rounded-2xl shadow-xl" style={{ bottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))' }}>
+        <div className="fixed left-1/2 -translate-x-1/2 z-20 flex items-center gap-0.5 px-2 py-1.5 bg-ink/95 backdrop-blur-sm border border-white/10 rounded-2xl shadow-xl" style={{ bottom: 'calc(5rem + env(safe-area-inset-bottom, 0px))' }}>
           {/* Fill color — shapes & paths */}
           {selHasShapes && (
             <label className="flex items-center gap-1 px-1.5 cursor-pointer" title="Remplissage">
