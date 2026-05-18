@@ -63,9 +63,15 @@ function computeLensTransform(
 
   const pad = 0.05;
   const s = Math.min(node.width * (1 - pad * 2) / fitW, node.height * (1 - pad * 2) / fitH);
-  const ox = node.x + node.width  / 2 - (fitX + fitW / 2) * s;
-  const oy = node.y + node.height / 2 - (fitY + fitH / 2) * s;
-  return { s, ox, oy };
+
+  // Apply lensView adjustments — must match drawLens() in renderer exactly.
+  // Expanded form of: ox = baseOx*userZoom + centerX*(1-userZoom) + panX
+  const lv = node.lensView;
+  const userZoom = lv?.zoom ?? 1;
+  const totalS = s * userZoom;
+  const ox = node.x + node.width  / 2 - (fitX + fitW / 2) * totalS + (lv?.panX ?? 0);
+  const oy = node.y + node.height / 2 - (fitY + fitH / 2) * totalS + (lv?.panY ?? 0);
+  return { s: totalS, ox, oy };
 }
 
 /** Find which node in the given scene tree hosts the specified inner scene id. */
@@ -480,7 +486,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
           scene: updatedNode.innerScene!,
           parentNodeId: node.id,
           label: nodeLabel(node),
-          viewportWhenLeft: { x: 0, y: 0, scale: 1 },
+          viewportWhenLeft: innerVp,
           lensTransform: lt ?? undefined,
         },
       ];
@@ -1502,6 +1508,24 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
           const parentScale = vp2.scale / lt.s;
           const parentVp: Viewport = { scale: parentScale, x: vp2.x - lt.ox * parentScale, y: vp2.y - lt.oy * parentScale };
           crossfadeRef.current = { ...crossfadeRef.current, progress: 0, fixedVp: parentVp };
+          setScene(parentEntry.scene);
+          setViewport(parentVp);
+          viewportRef.current = parentVp;
+          prevScaleRef.current = parentVp.scale;
+          setSceneStack(stack.slice(0, -1));
+          setSelectedNodeIds(new Set());
+          setEnterHintNodeId(null);
+          setAutoEnterToast(null);
+          markDirty();
+        }
+        return;
+      } else if (!lt && zoomingOut && viewport.scale < 0.4) {
+        // Fallback exit: entered an empty/unbounded scene with no lensTransform.
+        // Restore the saved outer viewport (viewportWhenLeft of parent level).
+        const now = Date.now();
+        if (now - lastAutoExitTimeRef.current > 800) {
+          lastAutoExitTimeRef.current = now;
+          const parentVp = parentEntry.viewportWhenLeft;
           setScene(parentEntry.scene);
           setViewport(parentVp);
           viewportRef.current = parentVp;
