@@ -11,6 +11,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "esm-potrace-wasm": "^0.4.4",
     "imagetracerjs": "^1.2.6",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"

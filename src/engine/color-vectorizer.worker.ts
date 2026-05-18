@@ -1,7 +1,6 @@
 /// <reference lib="webworker" />
 
-// @ts-ignore — imagetracerjs is a CJS module without types
-import ImageTracer from 'imagetracerjs';
+import { potrace, init } from 'esm-potrace-wasm';
 
 export type {};
 
@@ -25,18 +24,9 @@ interface WorkerOutput {
   sourceH: number;
 }
 
-interface Segment {
-  type: 'L' | 'Q';
-  x1: number; y1: number;
-  x2: number; y2: number;
-  x3?: number; y3?: number;
-}
-
 interface PaletteColor { r: number; g: number; b: number; a: number; }
 
 // ── Step 1: Median-cut color quantization ─────────────────────────────────────
-// Samples pixels and splits the RGB cube recursively by the widest channel.
-// Returns N representative colors that actually exist in the image.
 function buildPalette(data: Uint8ClampedArray, numColors: number): PaletteColor[] {
   const totalPixels = data.length / 4;
   const step = Math.max(1, Math.floor(totalPixels / 12000));
@@ -98,8 +88,6 @@ function buildPalette(data: Uint8ClampedArray, numColors: number): PaletteColor[
 }
 
 // ── Step 2: Pre-quantize ──────────────────────────────────────────────────────
-// Map every pixel to its nearest palette color.
-// imagetracerjs receives a perfectly flat-color image → no drift possible.
 function preQuantize(data: Uint8ClampedArray, palette: PaletteColor[]): Uint8ClampedArray {
   const out = new Uint8ClampedArray(data.length);
   for (let i = 0; i < data.length; i += 4) {
@@ -120,70 +108,137 @@ function preQuantize(data: Uint8ClampedArray, palette: PaletteColor[]): Uint8Cla
   return out;
 }
 
-// ── Step 3: Trace ─────────────────────────────────────────────────────────────
-function segmentsToPath(segments: Segment[]): string {
-  if (segments.length === 0) return '';
-  let d = `M ${segments[0].x1.toFixed(2)} ${segments[0].y1.toFixed(2)}`;
-  for (const s of segments) {
-    if (s.type === 'L') {
-      d += ` L ${s.x2.toFixed(2)} ${s.y2.toFixed(2)}`;
-    } else {
-      d += ` Q ${s.x2.toFixed(2)} ${s.y2.toFixed(2)} ${s.x3!.toFixed(2)} ${s.y3!.toFixed(2)}`;
-    }
+// ── Step 3: Count pixels per palette entry (for layer ordering) ───────────────
+function countByColor(quantized: Uint8ClampedArray, palette: PaletteColor[]): number[] {
+  const counts = new Array(palette.length).fill(0);
+  const map = new Map<number, number>();
+  for (let j = 0; j < palette.length; j++) {
+    map.set((palette[j].r << 16) | (palette[j].g << 8) | palette[j].b, j);
   }
-  return d + ' Z';
+  for (let i = 0; i < quantized.length; i += 4) {
+    if (quantized[i + 3] < 20) continue;
+    const key = (quantized[i] << 16) | (quantized[i + 1] << 8) | quantized[i + 2];
+    const idx = map.get(key);
+    if (idx !== undefined) counts[idx]++;
+  }
+  return counts;
 }
 
-function process(data: Uint8ClampedArray, w: number, h: number, numColors: number): LayerData[] {
-  // Build exact palette from the actual image.
-  const palette = buildPalette(data, numColors);
+// ── Step 4: SVG path extraction ───────────────────────────────────────────────
+// Potrace emits paths in Y-up coordinates and wraps them in a
+// transform="scale(1,-1) translate(0,-H)" group. When we extract
+// only the `d` attributes, we must flip Y so paths land in the
+// Y-down canvas coordinate space expected by the renderer.
 
-  // Pre-quantize: every pixel becomes exactly one palette color.
-  // imagetracerjs traces a flat-color image → paths are clean, colors are exact.
+function flipYInPath(d: string, h: number): string {
+  // Insert spaces around command letters so we can tokenize uniformly.
+  const normalized = d.replace(/([MLCQZmlcqz])/g, ' $1 ').replace(/,/g, ' ').trim();
+  const tokens = normalized.split(/\s+/).filter(Boolean);
+  const out: string[] = [];
+  let i = 0;
+  while (i < tokens.length) {
+    const cmd = tokens[i].toUpperCase();
+    if (cmd === 'M' || cmd === 'L') {
+      const x = tokens[++i]; const y = +tokens[++i];
+      out.push(`${cmd}${x} ${(h - y).toFixed(3)}`);
+    } else if (cmd === 'C') {
+      const x1 = tokens[++i]; const y1 = +tokens[++i];
+      const x2 = tokens[++i]; const y2 = +tokens[++i];
+      const x  = tokens[++i]; const y  = +tokens[++i];
+      out.push(`C${x1} ${(h-y1).toFixed(3)} ${x2} ${(h-y2).toFixed(3)} ${x} ${(h-y).toFixed(3)}`);
+    } else if (cmd === 'Q') {
+      const x1 = tokens[++i]; const y1 = +tokens[++i];
+      const x  = tokens[++i]; const y  = +tokens[++i];
+      out.push(`Q${x1} ${(h-y1).toFixed(3)} ${x} ${(h-y).toFixed(3)}`);
+    } else if (cmd === 'Z') {
+      out.push('Z');
+    } else {
+      out.push(tokens[i]);
+    }
+    i++;
+  }
+  return out.join(' ');
+}
+
+function extractPaths(svg: string, sourceH: number): string[] {
+  // Detect whether Potrace applied a Y-flip transform in the SVG wrapper.
+  const hasYFlip = /scale\s*\(\s*1\s*,\s*-1\s*\)/.test(svg);
+  const paths: string[] = [];
+  const re = /\bd="([^"]+)"/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(svg)) !== null) {
+    paths.push(hasYFlip ? flipYInPath(m[1], sourceH) : m[1]);
+  }
+  return paths;
+}
+
+// ── Step 5: Potrace per-color layer ───────────────────────────────────────────
+async function process(data: Uint8ClampedArray, w: number, h: number, numColors: number): Promise<LayerData[]> {
+  const palette = buildPalette(data, numColors);
   const quantized = preQuantize(data, palette);
 
-  const imgData = { data: quantized, width: w, height: h };
-
-  const options = {
-    colorsampling: 0,   // use our palette, no internal re-quantization
-    pal: palette,
-    blurradius: 0,
-    ltres: 0.1,
-    qtres: 0.1,
-    pathomit: 2,
-    rightangleenhance: true,
-  };
-
-  const tracedata = ImageTracer.imagedataToTracedata(imgData, options);
+  // Sort colors by pixel count descending so largest-area layers come first.
+  const counts = countByColor(quantized, palette);
+  const sortedIndices = palette.map((_, i) => i).sort((a, b) => counts[b] - counts[a]);
 
   const layers: LayerData[] = [];
-  for (let li = 0; li < tracedata.layers.length; li++) {
-    const color = tracedata.palette[li];
-    if (!color || color.a < 64) continue;
 
-    const paths: string[] = [];
-    for (const pathObj of tracedata.layers[li]) {
-      if (!pathObj.segments || pathObj.segments.length < 2) continue;
-      const d = segmentsToPath(pathObj.segments);
-      if (d) paths.push(d);
+  for (const pi of sortedIndices) {
+    const color = palette[pi];
+    if (color.a < 64) continue;
+
+    const colorKey = (color.r << 16) | (color.g << 8) | color.b;
+
+    // Build binary mask: this color → black foreground, everything else → white.
+    const maskData = new Uint8ClampedArray(w * h * 4);
+    for (let i = 0; i < quantized.length; i += 4) {
+      const isFg = quantized[i + 3] >= 20 &&
+        ((quantized[i] << 16) | (quantized[i + 1] << 8) | quantized[i + 2]) === colorKey;
+      const v = isFg ? 0 : 255;
+      maskData[i] = v; maskData[i + 1] = v; maskData[i + 2] = v; maskData[i + 3] = 255;
     }
 
+    const imageData = new ImageData(maskData, w, h);
+
+    let svg: string;
+    try {
+      svg = await potrace(imageData, {
+        turdsize: 2,
+        alphamax: 1.0,
+        opticurve: 1,
+        opttolerance: 0.2,
+      });
+    } catch {
+      continue;
+    }
+
+    const paths = extractPaths(svg, h);
     if (paths.length === 0) continue;
+
     layers.push({ r: color.r, g: color.g, b: color.b, a: color.a, paths });
   }
 
   return layers;
 }
 
-self.onmessage = (e: MessageEvent<WorkerInput>) => {
+// ── Entry point ───────────────────────────────────────────────────────────────
+let initialized = false;
+
+self.onmessage = async (e: MessageEvent<WorkerInput>) => {
   const { nodeId, pixels, width, height, numColors } = e.data;
   try {
+    if (!initialized) {
+      await init();
+      initialized = true;
+    }
+
     const data = new Uint8ClampedArray(pixels);
     if (width < 1 || height < 1 || data.length < width * height * 4) {
       (self as unknown as Worker).postMessage({ nodeId, layers: [], sourceW: width, sourceH: height });
       return;
     }
-    const layers = process(data, width, height, numColors ?? 32);
+
+    const layers = await process(data, width, height, numColors ?? 32);
     (self as unknown as Worker).postMessage({ nodeId, layers, sourceW: width, sourceH: height } as WorkerOutput);
   } catch (err) {
     console.error('vectorizer error', err);
