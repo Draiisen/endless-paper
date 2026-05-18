@@ -449,7 +449,6 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
     const h = canvas?.height ?? window.innerHeight;
 
     const doEnter = () => {
-      const isNewInnerScene = !node.innerScene;
       const updatedNode = ensureInnerScene(node);
       const stack = sceneStackRef.current;
       // Use the scene stored in the stack (kept in sync by handleSceneChange) rather
@@ -472,13 +471,6 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
         };
       } else {
         innerVp = { x: w / 2, y: h / 2, scale: 1 };
-      }
-
-      // Commit the parent scene update to history + auto-save so the lens creation
-      // can be undone and is saved even if the user closes before drawing inside.
-      // Must happen before setSceneStack so handleSceneChange sees a 1-entry stack.
-      if (isNewInnerScene) {
-        onSceneChange(updatedScene, vp);
       }
 
       const newStack: SceneLevel[] = [
@@ -510,7 +502,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
     } else {
       animateViewport(frameNodeViewport(node), 300, doEnter);
     }
-  }, [frameNodeViewport, animateViewport, setScene, setViewport, setSceneStack, setSelectedNodeIds, onSceneChange, markDirty]);
+  }, [frameNodeViewport, animateViewport, setScene, setViewport, setSceneStack, setSelectedNodeIds, markDirty]);
 
   // Marquee selection state — also tracked in gestures hook; we only keep this
   // to trigger re-renders / dirty marks while marqueeing.
