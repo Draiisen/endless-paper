@@ -1,4 +1,4 @@
-const CACHE_NAME = 'endless-paper-v1';
+const CACHE_NAME = 'endless-paper-v3';
 // We pre-cache the app shell. Hashed bundle assets get cached lazily on first
 // load via the cache-first fetch handler.
 const PRECACHE = [
