@@ -1115,6 +1115,11 @@ export default function App({ initialState, settings }: AppProps) {
   const hasMultiSelection = selectedNodes.length >= 2;
   const hasSelection = selectedNodes.length >= 1;
   const selectedAreInGroup = selectedNodes.length > 0 && selectedNodes.every(n => !!n.groupId);
+
+  // Auto-close properties panel when nothing is selected
+  useEffect(() => {
+    if (selectedNodeIds.size === 0) setShowProperties(false);
+  }, [selectedNodeIds]);
   const sceneLayers = ensureLayers(scene);
   const sceneCatalog = buildSceneCatalog(rootSceneRef.current);
   const zoomPercent = Math.round(viewport.scale * 100);
