@@ -85,6 +85,15 @@ export default function App({ initialState, settings }: AppProps) {
   const [showSaves, setShowSaves] = useState(false);
   const [lensAdjustId, setLensAdjustId] = useState<string | null>(null);
   const lensAdjustDragRef = useRef<{ startX: number; startY: number; startPanX: number; startPanY: number } | null>(null);
+  const [actionBarPos, setActionBarPos] = useState(() => ({
+    x: Math.max(8, Math.floor(window.innerWidth / 2 - 160)),
+    y: window.innerHeight - 130,
+  }));
+  const actionBarDragRef = useRef<{ startX: number; startY: number; startPosX: number; startPosY: number } | null>(null);
+  const [miniMapPos, setMiniMapPos] = useState(() => ({
+    x: 64,
+    y: Math.max(8, window.innerHeight - 200),
+  }));
   const [projectSizeMB, setProjectSizeMB] = useState(0);
   const [lodProcessingCount, setLodProcessingCount] = useState(0);
   const [shareFlash, setShareFlash] = useState<'copied' | 'toobig' | null>(null);
@@ -1622,7 +1631,28 @@ export default function App({ initialState, settings }: AppProps) {
 
       {/* Unified selection action bar */}
       {hasSelection && !viewerMode && (
-        <div className="fixed left-1/2 -translate-x-1/2 z-20 flex items-center gap-0.5 px-2 py-1.5 bg-ink/95 backdrop-blur-sm border border-white/10 rounded-2xl shadow-xl" style={{ bottom: 'calc(5rem + env(safe-area-inset-bottom, 0px))' }}>
+        <div className="fixed z-20 flex items-center gap-0.5 px-2 py-1.5 bg-ink/95 backdrop-blur-sm border border-white/10 rounded-2xl shadow-xl" style={{ left: actionBarPos.x, top: actionBarPos.y }}>
+          {/* Drag grip */}
+          <div
+            className="text-gray-600 text-xs px-0.5 cursor-move touch-manipulation select-none flex items-center"
+            style={{ touchAction: 'none' }}
+            title="Déplacer"
+            onPointerDown={(e) => {
+              e.currentTarget.setPointerCapture(e.pointerId);
+              actionBarDragRef.current = { startX: e.clientX, startY: e.clientY, startPosX: actionBarPos.x, startPosY: actionBarPos.y };
+            }}
+            onPointerMove={(e) => {
+              if (!actionBarDragRef.current) return;
+              const dx = e.clientX - actionBarDragRef.current.startX;
+              const dy = e.clientY - actionBarDragRef.current.startY;
+              setActionBarPos({
+                x: Math.max(0, Math.min(window.innerWidth - 80, actionBarDragRef.current.startPosX + dx)),
+                y: Math.max(0, Math.min(window.innerHeight - 50, actionBarDragRef.current.startPosY + dy)),
+              });
+            }}
+            onPointerUp={() => { actionBarDragRef.current = null; }}
+          >⠿</div>
+          <div className="w-px h-5 bg-white/15 mx-0.5" />
           {/* Fill color — shapes & paths */}
           {selHasShapes && (
             <label className="flex items-center gap-1 px-1.5 cursor-pointer" title="Remplissage">
@@ -1706,6 +1736,9 @@ export default function App({ initialState, settings }: AppProps) {
           viewport={viewport}
           canvasWidth={window.innerWidth}
           canvasHeight={window.innerHeight}
+          pos={miniMapPos}
+          onPosChange={setMiniMapPos}
+          onClose={() => setShowMiniMap(false)}
           onTeleport={handleMiniMapTeleport}
         />
       )}

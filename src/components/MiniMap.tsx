@@ -8,6 +8,9 @@ interface MiniMapProps {
   viewport: Viewport;
   canvasWidth: number;
   canvasHeight: number;
+  pos: { x: number; y: number };
+  onPosChange: (pos: { x: number; y: number }) => void;
+  onClose: () => void;
   onTeleport: (worldX: number, worldY: number) => void;
 }
 
@@ -15,9 +18,10 @@ const W = 200;
 const H = 140;
 const PAD = 24;
 
-export function MiniMap({ scene, viewport, canvasWidth, canvasHeight, onTeleport }: MiniMapProps) {
+export function MiniMap({ scene, viewport, canvasWidth, canvasHeight, pos, onPosChange, onClose, onTeleport }: MiniMapProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef(0);
+  const dragRef = useRef<{ startX: number; startY: number; startPosX: number; startPosY: number } | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -52,10 +56,6 @@ export function MiniMap({ scene, viewport, canvasWidth, canvasHeight, onTeleport
       // Draw scene at minimap scale
       renderScene(ctx, scene, miniVp, { showGrid: false });
 
-      // Draw viewport rectangle
-      const vx = ((-viewport.x / viewport.scale) - wx) * miniScale + miniVp.x - (wx * miniScale - miniVp.x) + wx * miniScale;
-      const vy = ((-viewport.y / viewport.scale) - wy) * miniScale + miniVp.y - (wy * miniScale - miniVp.y) + wy * miniScale;
-
       // Viewport bounds in world space
       const vwLeft = -viewport.x / viewport.scale;
       const vwTop = -viewport.y / viewport.scale;
@@ -80,8 +80,6 @@ export function MiniMap({ scene, viewport, canvasWidth, canvasHeight, onTeleport
       ctx.fillStyle = 'rgba(74,144,217,0.08)';
       ctx.fillRect(tl.x, tl.y, rw, rh);
       ctx.restore();
-
-      void vx; void vy;
     });
 
     return () => cancelAnimationFrame(rafRef.current);
@@ -92,7 +90,6 @@ export function MiniMap({ scene, viewport, canvasWidth, canvasHeight, onTeleport
     const cx = e.clientX - rect.left;
     const cy = e.clientY - rect.top;
 
-    // Find what world point this mini-map pixel corresponds to
     const nodes = scene.nodes;
     let wx = -400, wy = -300, ww = 800, wh = 600;
     if (nodes.length > 0) {
@@ -113,15 +110,50 @@ export function MiniMap({ scene, viewport, canvasWidth, canvasHeight, onTeleport
     onTeleport(worldX, worldY);
   };
 
+  const handleDragStart = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragRef.current = { startX: e.clientX, startY: e.clientY, startPosX: pos.x, startPosY: pos.y };
+  };
+
+  const handleDragMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current) return;
+    const dx = e.clientX - dragRef.current.startX;
+    const dy = e.clientY - dragRef.current.startY;
+    const newX = Math.max(0, Math.min(window.innerWidth - W - 4, dragRef.current.startPosX + dx));
+    const newY = Math.max(0, Math.min(window.innerHeight - H - 32, dragRef.current.startPosY + dy));
+    onPosChange({ x: newX, y: newY });
+  };
+
+  const handleDragEnd = () => { dragRef.current = null; };
+
   return (
-    <div className="fixed bottom-24 left-16 z-20 rounded-lg overflow-hidden shadow-xl border border-white/10 bg-ink/80 backdrop-blur-sm">
+    <div
+      className="fixed z-20 rounded-lg overflow-hidden shadow-xl border border-white/10 bg-ink/80 backdrop-blur-sm"
+      style={{ left: pos.x, top: pos.y }}
+    >
+      {/* Drag handle strip */}
+      <div
+        className="flex items-center justify-between px-2 bg-white/5 cursor-move select-none"
+        style={{ height: 22, touchAction: 'none' }}
+        onPointerDown={handleDragStart}
+        onPointerMove={handleDragMove}
+        onPointerUp={handleDragEnd}
+      >
+        <span className="text-[10px] text-gray-500">⠿ Mini-carte</span>
+        <button
+          className="text-gray-600 hover:text-gray-300 text-[11px] w-5 h-5 flex items-center justify-center rounded transition-colors"
+          onPointerDown={e => e.stopPropagation()}
+          onClick={onClose}
+          title="Masquer"
+        >✕</button>
+      </div>
       <canvas
         ref={canvasRef}
         width={W}
         height={H}
         className="block cursor-crosshair"
         onClick={handleClick}
-        title="Click to navigate"
+        title="Cliquer pour naviguer"
       />
     </div>
   );
