@@ -362,7 +362,7 @@ export default function App({ initialState, settings }: AppProps) {
       const innerEntry = stack[stack.length - 1];
       const lt = innerEntry.lensTransform;
       if (lt) {
-        const vp2 = viewport;
+        const vp2 = viewportRef.current; // use ref, always current even mid-animation
         const parentScale = vp2.scale / lt.s;
         restoredViewport = {
           scale: parentScale,

@@ -899,7 +899,7 @@ function drawLens(ctx: CanvasRenderingContext2D, node: SceneNode, viewportScale:
     ctx.transform(s * userZoom, 0, 0, s * userZoom, ox, oy);
 
     const innerScale = viewportScale * s;
-    for (const innerNode of inner.nodes.slice(0, 24)) {
+    for (const innerNode of inner.nodes) {
       drawNode(ctx, innerNode, undefined, false, 0, innerScale, true, 1);
     }
   }
