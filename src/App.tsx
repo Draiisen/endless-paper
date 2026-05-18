@@ -73,7 +73,7 @@ export default function App({ initialState, settings }: AppProps) {
   const [assets, setAssets] = useState<Asset[]>(initAssets);
   const [showLibrary, setShowLibrary] = useState(false);
   const [showLayers, setShowLayers] = useState(false);
-  const [showMiniMap, setShowMiniMap] = useState(settings.miniMapVisible ?? window.innerWidth >= 640);
+  const [showMiniMap, setShowMiniMap] = useState(settings.miniMapVisible ?? false);
   const [showProperties, setShowProperties] = useState(false);
   const [activeLayerId, setActiveLayerId] = useState<string>('');
   const [symmetry, setSymmetry] = useState<SymmetryMode>(settings.symmetry ?? 'off');
@@ -1363,6 +1363,14 @@ export default function App({ initialState, settings }: AppProps) {
 
             {/* Desktop file buttons — hidden on mobile */}
             <div className="hidden sm:flex items-center gap-1 flex-shrink-0">
+              {/* Minimap toggle */}
+              <button
+                onClick={() => setShowMiniMap(v => !v)}
+                title="Mini-carte (M)"
+                className={`p-1.5 rounded transition-colors flex-shrink-0 touch-manipulation ${showMiniMap ? 'bg-accent/20 text-accent' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}
+              >
+                <svg viewBox="0 0 24 24" className="w-4 h-4 fill-current"><path d="M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5z"/></svg>
+              </button>
               {singleSelection && (
                 <button onClick={() => setShowProperties(v => !v)} title="Properties" className={`p-1.5 rounded text-xs transition-colors ${showProperties ? 'bg-accent text-white' : 'text-gray-400 hover:text-white hover:bg-white/10'}`}>⚙</button>
               )}
