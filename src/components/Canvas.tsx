@@ -1388,7 +1388,6 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
 
     const w = canvas.width;
     const h = canvas.height;
-    const zoomingIn  = viewport.scale > prevScaleRef.current * 1.0001 || lastWheelDeltaY.current < 0;
     const zoomingOut = viewport.scale < prevScaleRef.current * 0.9999 || lastWheelDeltaY.current > 0;
     prevScaleRef.current = viewport.scale;
     lastWheelDeltaY.current = 0;
@@ -1459,7 +1458,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
         };
         markDirty();
 
-        if (progress >= 1 && zoomingIn) {
+        if (progress >= 1) {
           // Capture the exact inner viewport NOW (before performEnterScene mutates viewportRef)
           const vp1 = viewportRef.current;
           const fixedVp: Viewport = {
@@ -1500,7 +1499,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
         }
         const progress = Math.min(1, Math.max(0, (innerRatio - LENS_FADE_START) / (LENS_FADE_FULL - LENS_FADE_START)));
         const now = Date.now();
-        const pastCooldown = now - lastAutoExitTimeRef.current > 800;
+        const pastCooldown = now - lastAutoExitTimeRef.current > 200;
 
         if (progress >= 1) {
           // Fully inside, past transition zone — clear any stale exit crossfade
@@ -1537,7 +1536,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
         // Fallback exit: entered an empty/unbounded scene with no lensTransform.
         // Restore the saved outer viewport (viewportWhenLeft of parent level).
         const now = Date.now();
-        if (now - lastAutoExitTimeRef.current > 800) {
+        if (now - lastAutoExitTimeRef.current > 200) {
           lastAutoExitTimeRef.current = now;
           const parentVp = parentEntry.viewportWhenLeft;
           setScene(parentEntry.scene);
