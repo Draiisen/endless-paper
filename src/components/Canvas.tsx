@@ -1369,10 +1369,12 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   // Track previous viewport scale to detect "zooming in"
   const prevScaleRef = useRef(viewport.scale);
 
-  // Seamless zoom-through: crossfade driven by zoom level (no sudden switch)
-  // Ratio thresholds: node/inner-content occupying these fractions of screen → crossfade
-  const LENS_FADE_START = 0.55;  // crossfade starts (world-1 lens → world-2 content)
-  const LENS_FADE_FULL  = 1.75;  // crossfade completes → scene switch fires (invisible)
+  // Seamless zoom-through: switch fires when the lens node covers the entire screen,
+  // so nothing from the other scene is visible — the switch is invisible.
+  // ENTER: node fills ≥100% of screen (min dimension) → outer scene fully hidden.
+  // EXIT:  inner content ≤90% → parent lens node fills ≥100% → inner scene fully hidden.
+  const ENTER_THRESHOLD = 1.0;
+  const EXIT_THRESHOLD  = 0.9;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1445,35 +1447,24 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
       }
     }
 
-    if (enterNode && enterRatio > LENS_FADE_START) {
+    // Node covers full screen → switch is invisible (outer scene completely hidden)
+    if (enterNode && enterRatio >= ENTER_THRESHOLD) {
       const lt = computeLensTransform(enterNode, enterNode.innerScene!);
       if (lt) {
-        const progress = Math.min(1, (enterRatio - LENS_FADE_START) / (LENS_FADE_FULL - LENS_FADE_START));
-        crossfadeRef.current = {
-          innerScene: enterNode.innerScene!,
-          outerScene: currentScene,
-          lt,
-          entering: true,
-          progress,
+        const vp1 = viewportRef.current;
+        const fixedVp: Viewport = {
+          scale: lt.s * vp1.scale,
+          x: lt.ox * vp1.scale + vp1.x,
+          y: lt.oy * vp1.scale + vp1.y,
         };
-        markDirty();
-
-        if (progress >= 1) {
-          // Capture the exact inner viewport NOW (before performEnterScene mutates viewportRef)
-          const vp1 = viewportRef.current;
-          const fixedVp: Viewport = {
-            scale: lt.s * vp1.scale,
-            x: lt.ox * vp1.scale + vp1.x,
-            y: lt.oy * vp1.scale + vp1.y,
-          };
-          crossfadeRef.current = { ...crossfadeRef.current, progress: 1, fixedVp };
-          performEnterScene(enterNode, true);
-        }
+        // fixedVp bridges the one-frame React state gap — no visible blend
+        crossfadeRef.current = { innerScene: enterNode.innerScene!, outerScene: currentScene, lt, entering: true, progress: 1, fixedVp };
+        performEnterScene(enterNode, true);
         return;
       }
     }
 
-    // No entering node — clear entering crossfade
+    // Clear stale entering bridge once React has caught up
     if (crossfadeRef.current?.entering) {
       crossfadeRef.current = null;
       markDirty();
@@ -1497,29 +1488,16 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
         } else {
           innerRatio = 0;
         }
-        const progress = Math.min(1, Math.max(0, (innerRatio - LENS_FADE_START) / (LENS_FADE_FULL - LENS_FADE_START)));
         const now = Date.now();
         const pastCooldown = now - lastAutoExitTimeRef.current > 200;
 
-        if (progress >= 1) {
-          // Fully inside, past transition zone — clear any stale exit crossfade
-          if (crossfadeRef.current && !crossfadeRef.current.entering) {
-            crossfadeRef.current = null;
-            markDirty();
-          }
-        } else if (zoomingOut && pastCooldown) {
-          // Actively zooming out in transition zone — update crossfade driven by zoom
-          crossfadeRef.current = { innerScene: currentScene, outerScene: parentEntry.scene, lt, entering: false, progress };
-          markDirty();
-        }
-        // If paused in transition zone: preserve crossfade as-is (no flicker)
-
-        // Fire scene switch when ratio crosses threshold — no zoom-direction requirement
-        if (progress <= 0 && pastCooldown) {
+        // Inner content ≤ EXIT_THRESHOLD → parent node covers full screen → invisible switch
+        if (innerRatio < EXIT_THRESHOLD && pastCooldown) {
           lastAutoExitTimeRef.current = now;
           const vp2 = viewportRef.current;
           const parentScale = vp2.scale / lt.s;
           const parentVp: Viewport = { scale: parentScale, x: vp2.x - lt.ox * parentScale, y: vp2.y - lt.oy * parentScale };
+          // fixedVp bridges the one-frame React state gap — no visible blend
           crossfadeRef.current = { innerScene: currentScene, outerScene: parentEntry.scene, lt, entering: false, progress: 0, fixedVp: parentVp };
           setScene(parentEntry.scene);
           setViewport(parentVp);
@@ -1553,7 +1531,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
       }
     }
 
-    // Clear exit crossfade when no longer in a nested scene
+    // Clear stale exit bridge once React has caught up
     if (crossfadeRef.current && !crossfadeRef.current.entering) {
       crossfadeRef.current = null;
       markDirty();
