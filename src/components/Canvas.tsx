@@ -1485,7 +1485,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
       const currentLevel = stack[stack.length - 1];
       const parentEntry = stack[stack.length - 2];
       const lt = currentLevel.lensTransform;
-      if (lt && zoomingOut) {
+      if (lt) {
         let innerRatio: number;
         if (currentScene.bounds) {
           innerRatio = Math.min(
@@ -1496,19 +1496,32 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
           const bb = getBoundingBox(currentScene.nodes);
           innerRatio = Math.min(bb.width * viewport.scale / w, bb.height * viewport.scale / h);
         } else {
-          innerRatio = 0; // empty, no bounds — crossfade immediately triggers exit
+          innerRatio = 0;
         }
         const progress = Math.min(1, Math.max(0, (innerRatio - LENS_FADE_START) / (LENS_FADE_FULL - LENS_FADE_START)));
-        // Show crossfade immediately — cooldown only gates the actual scene switch
-        crossfadeRef.current = { innerScene: currentScene, outerScene: parentEntry.scene, lt, entering: false, progress };
-        markDirty();
         const now = Date.now();
-        if (progress <= 0 && now - lastAutoExitTimeRef.current > 800) {
+        const pastCooldown = now - lastAutoExitTimeRef.current > 800;
+
+        if (progress >= 1) {
+          // Fully inside, past transition zone — clear any stale exit crossfade
+          if (crossfadeRef.current && !crossfadeRef.current.entering) {
+            crossfadeRef.current = null;
+            markDirty();
+          }
+        } else if (zoomingOut && pastCooldown) {
+          // Actively zooming out in transition zone — update crossfade driven by zoom
+          crossfadeRef.current = { innerScene: currentScene, outerScene: parentEntry.scene, lt, entering: false, progress };
+          markDirty();
+        }
+        // If paused in transition zone: preserve crossfade as-is (no flicker)
+
+        // Fire scene switch when ratio crosses threshold — no zoom-direction requirement
+        if (progress <= 0 && pastCooldown) {
           lastAutoExitTimeRef.current = now;
           const vp2 = viewportRef.current;
           const parentScale = vp2.scale / lt.s;
           const parentVp: Viewport = { scale: parentScale, x: vp2.x - lt.ox * parentScale, y: vp2.y - lt.oy * parentScale };
-          crossfadeRef.current = { ...crossfadeRef.current, progress: 0, fixedVp: parentVp };
+          crossfadeRef.current = { innerScene: currentScene, outerScene: parentEntry.scene, lt, entering: false, progress: 0, fixedVp: parentVp };
           setScene(parentEntry.scene);
           setViewport(parentVp);
           viewportRef.current = parentVp;
@@ -1541,7 +1554,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
       }
     }
 
-    // Clear exit crossfade when not in exit conditions
+    // Clear exit crossfade when no longer in a nested scene
     if (crossfadeRef.current && !crossfadeRef.current.entering) {
       crossfadeRef.current = null;
       markDirty();
