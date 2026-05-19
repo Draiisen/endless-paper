@@ -93,6 +93,7 @@ export interface CanvasHandle {
   groupSelected: () => void;
   ungroupSelected: () => void;
   animateViewportTo: (target: Viewport, onComplete: () => void, durationMs?: number) => void;
+  startExitCrossfade: (innerScene: Scene, outerScene: Scene, lt: { s: number; ox: number; oy: number }, onComplete: () => void) => void;
 }
 
 interface CanvasProps {
@@ -1679,7 +1680,22 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
     animateViewportTo: (target: Viewport, onComplete: () => void, durationMs?: number) => {
       animateViewport(target, durationMs ?? 600, onComplete);
     },
-  }), [vectorizeSelected, cancelStroke, enterSelected, groupSelected, ungroupSelected, animateViewport]);
+    startExitCrossfade: (innerScene: Scene, outerScene: Scene, lt: { s: number; ox: number; oy: number }, onComplete: () => void) => {
+      const DURATION = 350;
+      const start = Date.now();
+      crossfadeRef.current = { innerScene, outerScene, lt, entering: false, progress: 1 };
+      markDirty();
+      const tick = () => {
+        const elapsed = Date.now() - start;
+        const t = Math.max(0, 1 - elapsed / DURATION);
+        if (crossfadeRef.current) crossfadeRef.current = { ...crossfadeRef.current, progress: t };
+        markDirty();
+        if (t > 0) requestAnimationFrame(tick);
+        else onComplete();
+      };
+      requestAnimationFrame(tick);
+    },
+  }), [vectorizeSelected, cancelStroke, enterSelected, groupSelected, ungroupSelected, animateViewport, markDirty]);
 
   const commitTextEdit = useCallback(() => {
     // Enter triggers a commit then unmounts the textarea, whose blur fires a

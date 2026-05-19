@@ -457,9 +457,9 @@ function drawNode(
     ctx.globalAlpha = anim.alpha;
   }
 
-  // Nodes with inner scenes become lenses — their inner world is rendered through them
-  if (node.innerScene && lensDepth === 0) {
-    drawLens(ctx, node, viewportScale);
+  // Nodes with inner scenes become lenses — render up to 2 levels of nesting
+  if (node.innerScene && lensDepth < 2) {
+    drawLens(ctx, node, viewportScale, lensDepth);
   } else {
     switch (node.type) {
       case 'path':
@@ -819,9 +819,9 @@ function drawGroupOutline(ctx: CanvasRenderingContext2D, node: SceneNode): void 
 
 /**
  * Render a node as a "lens" — its inner scene's content is visible through it.
- * At depth-0 only (no recursive lens-inside-lens).
+ * Recurses up to depth 1 (shows lens-in-lens at one extra level).
  */
-function drawLens(ctx: CanvasRenderingContext2D, node: SceneNode, viewportScale: number): void {
+function drawLens(ctx: CanvasRenderingContext2D, node: SceneNode, viewportScale: number, lensDepth = 0): void {
   const inner = node.innerScene!;
   const screenW = node.width * viewportScale;
 
@@ -900,7 +900,7 @@ function drawLens(ctx: CanvasRenderingContext2D, node: SceneNode, viewportScale:
 
     const innerScale = viewportScale * s;
     for (const innerNode of inner.nodes) {
-      drawNode(ctx, innerNode, undefined, false, 0, innerScale, true, 1);
+      drawNode(ctx, innerNode, undefined, false, 0, innerScale, true, lensDepth + 1);
     }
   }
 

@@ -352,24 +352,20 @@ export default function App({ initialState, settings }: AppProps) {
       i === stack.length - 1 ? { ...entry, viewportWhenLeft: viewport } : entry
     );
     const targetEntry = updatedStack[index];
+    const innerEntry = stack[stack.length - 1];
 
-    // When going back one level, compute the parent viewport from the inverse lens
-    // transform (same math as seamless auto-exit). This ensures the parent scene
-    // is shown at the position matching what was visible in the inner scene, rather
-    // than restoring the (potentially very zoomed-in) viewport from auto-enter time.
+    // When going back one level, use inverse lens transform to compute parent viewport
+    // (same math as seamless auto-exit). Only applicable when there's a stored lensTransform.
+    const lt = index === stack.length - 2 ? innerEntry.lensTransform : undefined;
     let restoredViewport = targetEntry.viewportWhenLeft;
-    if (index === stack.length - 2) {
-      const innerEntry = stack[stack.length - 1];
-      const lt = innerEntry.lensTransform;
-      if (lt) {
-        const vp2 = viewportRef.current; // use ref, always current even mid-animation
-        const parentScale = vp2.scale / lt.s;
-        restoredViewport = {
-          scale: parentScale,
-          x: vp2.x - lt.ox * parentScale,
-          y: vp2.y - lt.oy * parentScale,
-        };
-      }
+    if (lt) {
+      const vp2 = viewportRef.current;
+      const parentScale = vp2.scale / lt.s;
+      restoredViewport = {
+        scale: parentScale,
+        x: vp2.x - lt.ox * parentScale,
+        y: vp2.y - lt.oy * parentScale,
+      };
     }
 
     const finalViewport = restoredViewport;
@@ -380,16 +376,9 @@ export default function App({ initialState, settings }: AppProps) {
       setSelectedNodeIds(new Set());
     };
     const handle = canvasHandleRef.current;
-    if (handle && index === stack.length - 2) {
-      const cur = viewportRef.current;
-      const cx = window.innerWidth / 2;
-      const cy = window.innerHeight / 2;
-      const targetScale = Math.max(0.001, cur.scale * 0.4);
-      const factor = targetScale / cur.scale;
-      handle.animateViewportTo(
-        { x: cx - (cx - cur.x) * factor, y: cy - (cy - cur.y) * factor, scale: targetScale },
-        finishNav
-      );
+    if (handle && lt) {
+      // Crossfade exit: inner scene fades out, outer scene fades in over 350ms
+      handle.startExitCrossfade(innerEntry.scene, targetEntry.scene, lt, finishNav);
     } else {
       finishNav();
     }
