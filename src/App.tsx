@@ -990,6 +990,8 @@ export default function App({ initialState, settings }: AppProps) {
     const vp = { scale, x: tbW + cw / 2 - (fitX + fitW / 2) * scale, y: 48 + ch / 2 - (fitY + fitH / 2) * scale };
     setViewport(vp);
     viewportRef.current = vp;
+    // Sync Canvas's prevScaleRef so the programmatic zoom isn't mistaken for a user zoom-out gesture
+    canvasHandleRef.current?.syncViewportTracker(vp.scale);
     setShowWorldSizeSheet(false);
     setShowMobileMenu(false);
     if (worldSizeToastTimerRef.current !== null) window.clearTimeout(worldSizeToastTimerRef.current);

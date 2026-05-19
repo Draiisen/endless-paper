@@ -94,6 +94,8 @@ export interface CanvasHandle {
   ungroupSelected: () => void;
   animateViewportTo: (target: Viewport, onComplete: () => void, durationMs?: number) => void;
   startExitCrossfade: (innerScene: Scene, outerScene: Scene, lt: { s: number; ox: number; oy: number }, onComplete: () => void) => void;
+  /** Call after programmatic viewport changes to prevent exit detection treating them as zoom-out gestures. */
+  syncViewportTracker: (scale: number) => void;
 }
 
 interface CanvasProps {
@@ -222,6 +224,9 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
 
   // Auto-exit zoom debounce
   const lastAutoExitTimeRef = useRef(0);
+  // Guards auto-exit: must have been "fully inside" (innerRatio ≥ ENTER_THRESHOLD) since last entry
+  // before auto-exit can fire. Prevents spurious immediate exit right after entering.
+  const wasFullyInsideRef = useRef(false);
 
   // Zoom focal point — updated by onZoom, used by auto-enter to pick correct node
   const zoomFocusRef = useRef<{ worldX: number; worldY: number; screenX: number; screenY: number; at: number } | null>(null);
@@ -493,6 +498,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
       ];
 
       lastAutoExitTimeRef.current = Date.now();
+      wasFullyInsideRef.current = false;
       prevScaleRef.current = innerVp.scale;
       setSceneStack(newStack);
       setScene(updatedNode.innerScene!);
@@ -1488,11 +1494,15 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
         } else {
           innerRatio = 0;
         }
+        // Track whether the user has zoomed "fully inside" since entry
+        if (innerRatio >= ENTER_THRESHOLD) wasFullyInsideRef.current = true;
+
         const now = Date.now();
         const pastCooldown = now - lastAutoExitTimeRef.current > 200;
 
         // Inner content ≤ EXIT_THRESHOLD → parent node covers full screen → invisible switch
-        if (innerRatio < EXIT_THRESHOLD && pastCooldown) {
+        // wasFullyInsideRef guards against spurious immediate exit right after entering
+        if (innerRatio < EXIT_THRESHOLD && pastCooldown && wasFullyInsideRef.current) {
           lastAutoExitTimeRef.current = now;
           const vp2 = viewportRef.current;
           const parentScale = vp2.scale / lt.s;
@@ -1684,6 +1694,9 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
         else onComplete();
       };
       requestAnimationFrame(tick);
+    },
+    syncViewportTracker: (scale: number) => {
+      prevScaleRef.current = scale;
     },
   }), [vectorizeSelected, cancelStroke, enterSelected, groupSelected, ungroupSelected, animateViewport, markDirty]);
 
