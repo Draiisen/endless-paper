@@ -67,6 +67,7 @@ export default function App({ initialState, settings }: AppProps) {
   const [showExport, setShowExport] = useState(false);
   const [viewport, setViewport] = useState<Viewport>(initViewport);
   const [pressureEnabled, setPressureEnabled] = useState(true);
+  const [strokeFixed, setStrokeFixed] = useState(false);
   const [autoEnterEnabled, setAutoEnterEnabled] = useState(true);
   const [showSavedFlash, setShowSavedFlash] = useState(false);
   const [autoSaveFailed, setAutoSaveFailed] = useState(false);
@@ -1179,6 +1180,7 @@ export default function App({ initialState, settings }: AppProps) {
         strokeColor={strokeColor}
         fillColor={fillColor}
         strokeWidth={strokeWidth}
+        strokeFixed={strokeFixed}
         brushType={brushType}
         selectedNodeIds={selectedNodeIds}
         setSelectedNodeIds={setSelectedNodeIds}
@@ -1278,6 +1280,29 @@ export default function App({ initialState, settings }: AppProps) {
           >
             <div className="rounded-full bg-white/60 flex-shrink-0" style={{ width: `${Math.max(3, Math.min(16, strokeWidth * 2))}px`, height: `${Math.max(3, Math.min(16, strokeWidth * 2))}px` }} />
             <span className="text-[8px] text-gray-500 font-mono leading-none">{strokeWidth}</span>
+          </button>
+          {/* Stroke size lock: screen-fixed vs world-fixed */}
+          <button
+            className={`w-8 h-8 flex-shrink-0 flex items-center justify-center rounded-lg touch-manipulation transition-colors ${strokeFixed ? 'bg-accent text-white' : 'text-gray-400 active:bg-white/10'}`}
+            title={strokeFixed ? 'Taille écran fixe (cliquer pour monde fixe)' : 'Taille monde fixe (cliquer pour écran fixe)'}
+            onClick={() => setStrokeFixed(!strokeFixed)}
+          >
+            <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              {strokeFixed ? (
+                /* Screen-fixed: magnifier with lock */
+                <>
+                  <circle cx="11" cy="11" r="7" />
+                  <line x1="16.5" y1="16.5" x2="22" y2="22" />
+                  <line x1="8" y1="11" x2="14" y2="11" />
+                </>
+              ) : (
+                /* World-fixed: globe/world icon */
+                <>
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M3 12h18M12 3c-2 3-3 6-3 9s1 6 3 9M12 3c2 3 3 6 3 9s-1 6-3 9" />
+                </>
+              )}
+            </svg>
           </button>
           {/* Brush type selector — visible only when pen is active */}
           {tool === 'pen' && (

@@ -122,6 +122,7 @@ interface CanvasProps {
   strokeColor: string;
   fillColor: string;
   strokeWidth: number;
+  strokeFixed?: boolean;
   brushType?: import('../types/scene').BrushType;
   selectedNodeIds: Set<string>;
   setSelectedNodeIds: (ids: Set<string>) => void;
@@ -157,7 +158,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   scene, setScene,
   viewport, setViewport,
   tool, setTool,
-  strokeColor, fillColor, strokeWidth, brushType = 'pen',
+  strokeColor, fillColor, strokeWidth, strokeFixed = false, brushType = 'pen',
   selectedNodeIds, setSelectedNodeIds,
   sceneStack, setSceneStack,
   onSceneChange,
@@ -212,6 +213,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   const toolRef = useRef(tool);
   const strokeColorRef = useRef(strokeColor);
   const strokeWidthRef = useRef(strokeWidth);
+  const strokeFixedRef = useRef(strokeFixed);
   const brushTypeRef = useRef(brushType);
   const fillColorRef = useRef(fillColor);
   const selectedNodeIdsRef = useRef(selectedNodeIds);
@@ -305,6 +307,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   useEffect(() => { toolRef.current = tool; }, [tool]);
   useEffect(() => { strokeColorRef.current = strokeColor; }, [strokeColor]);
   useEffect(() => { strokeWidthRef.current = strokeWidth; }, [strokeWidth]);
+  useEffect(() => { strokeFixedRef.current = strokeFixed; }, [strokeFixed]);
   useEffect(() => { brushTypeRef.current = brushType; }, [brushType]);
   useEffect(() => { fillColorRef.current = fillColor; }, [fillColor]);
   useEffect(() => { selectedNodeIdsRef.current = selectedNodeIds; needsRenderRef.current = true; }, [selectedNodeIds]);
@@ -595,9 +598,10 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
 
       const t = toolRef.current;
       if (t !== 'rect' && t !== 'circle') { markDirty(); return; }
+      const effectiveStrokeWidth = strokeFixedRef.current ? strokeWidthRef.current / viewportRef.current.scale : strokeWidthRef.current;
       const node = createNode(t, x, y, w, h);
       node.stroke = strokeColorRef.current;
-      node.strokeWidth = strokeWidthRef.current;
+      node.strokeWidth = effectiveStrokeWidth;
       node.fill = fillColorRef.current;
       if (activeLayerIdRef.current) node.layerId = activeLayerIdRef.current;
       let newScene = addNode(sceneRef.current, node);
@@ -621,7 +625,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
         for (const tr of transforms) {
           const mNode = createNode(t, tr.nx - w / 2, tr.ny - h / 2, w, h);
           mNode.stroke = strokeColorRef.current;
-          mNode.strokeWidth = strokeWidthRef.current;
+          mNode.strokeWidth = effectiveStrokeWidth;
           mNode.fill = fillColorRef.current;
           if (activeLayerIdRef.current) mNode.layerId = activeLayerIdRef.current;
           newScene = addNode(newScene, mNode);
@@ -1123,7 +1127,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
     (vp) => { setViewport(vp); viewportRef.current = vp; markDirty(); },
     () => toolRef.current,
     () => strokeColorRef.current,
-    () => strokeWidthRef.current,
+    () => strokeFixedRef.current ? strokeWidthRef.current / viewportRef.current.scale : strokeWidthRef.current,
     gestureCallbacks,
     () => pressureEnabledRef.current,
     () => stabilizerRef.current,
@@ -1258,13 +1262,14 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
 
             // Draw live stroke (and mirrored previews)
             const pts = getLivePoints();
+            const liveW = strokeFixedRef.current ? strokeWidthRef.current / viewportRef.current.scale : strokeWidthRef.current;
             if (pts.length > 1) {
-              renderLiveStroke(ctx, pts, strokeColorRef.current, strokeWidthRef.current, viewportRef.current, pressureEnabledRef.current, brushTypeRef.current);
+              renderLiveStroke(ctx, pts, strokeColorRef.current, liveW, viewportRef.current, pressureEnabledRef.current, brushTypeRef.current);
               if (symmMode !== 'off') {
                 const mirPtSets = mirroredPoints(pts, symmMode, symmCx, symmCy);
                 for (const mPts of mirPtSets) {
                   if (mPts.length > 1) {
-                    renderLiveStroke(ctx, mPts, strokeColorRef.current, strokeWidthRef.current, viewportRef.current, pressureEnabledRef.current, brushTypeRef.current);
+                    renderLiveStroke(ctx, mPts, strokeColorRef.current, liveW, viewportRef.current, pressureEnabledRef.current, brushTypeRef.current);
                   }
                 }
               }
@@ -1273,7 +1278,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
             if (liveShapeActive && ss && se) {
               renderLiveShape(ctx, ss.x, ss.y, se.x, se.y,
                 toolRef.current as 'rect' | 'circle',
-                strokeColorRef.current, fillColorRef.current, strokeWidthRef.current,
+                strokeColorRef.current, fillColorRef.current, liveW,
                 viewportRef.current);
             }
 
@@ -1775,7 +1780,8 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
           const widthMap: Record<string, number> = { pen: 1, pencil: 0.85, marker: 2, brush: 1.4 };
           const bw = widthMap[brushType] ?? 1;
           // Browsers limit cursor images to ~32px; cap accordingly.
-          const r = Math.max(2, Math.min(14, strokeWidth * viewport.scale * 0.5 * bw));
+          const effectiveW = strokeFixed ? strokeWidth : strokeWidth * viewport.scale;
+          const r = Math.max(2, Math.min(14, effectiveW * 0.5 * bw));
           const size = Math.ceil(r * 2 + 4);
           const center = size / 2;
           const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${size}' height='${size}'><circle cx='${center}' cy='${center}' r='${r}' fill='none' stroke='%231a1a2e' stroke-width='1.5'/></svg>`;
