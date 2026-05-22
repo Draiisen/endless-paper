@@ -37,12 +37,13 @@ function findSceneById(root: import('../types/scene').Scene, targetId: string): 
 }
 
 /** Compute the lens transform (inner-world → world-1 canvas coords) for a node's inner scene.
- * Must match drawLens() in renderer exactly — uses scene.bounds if set, else content bbox.
+ * Must match drawLens() in renderer exactly — uses scene.bounds if set, else content bbox,
+ * with implicit node-sized bounds for empty unbounded scenes.
  */
 function computeLensTransform(
   node: import('../types/scene').SceneNode,
   inner: { nodes: import('../types/scene').SceneNode[]; bounds?: { width: number; height: number } },
-): { s: number; ox: number; oy: number } | null {
+): { s: number; ox: number; oy: number; fitWidth: number; fitHeight: number } | null {
   let fitX: number, fitY: number, fitW: number, fitH: number;
 
   if (inner.bounds) {
@@ -50,8 +51,13 @@ function computeLensTransform(
     fitY = -inner.bounds.height / 2;
     fitW = inner.bounds.width;
     fitH = inner.bounds.height;
+  } else if (inner.nodes.length === 0) {
+    // Empty unbounded: implicit fit rectangle matching node's aspect ratio
+    fitX = -node.width / 2;
+    fitY = -node.height / 2;
+    fitW = node.width;
+    fitH = node.height;
   } else {
-    if (inner.nodes.length === 0) return null;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const n of inner.nodes) {
       minX = Math.min(minX, n.x); minY = Math.min(minY, n.y);
@@ -62,7 +68,15 @@ function computeLensTransform(
   }
 
   const pad = 0.05;
-  const s = Math.min(node.width * (1 - pad * 2) / fitW, node.height * (1 - pad * 2) / fitH);
+  // For circle/ellipse nodes the fit rectangle must fit inside the ellipse (not the bounding box),
+  // otherwise corners of the content get cropped by the circular clip.
+  // Axis-aligned rectangle (W,H) inscribed in ellipse (a,b): (W/2/a)² + (H/2/b)² = 1
+  let s: number;
+  if (node.type === 'circle') {
+    s = (1 - pad * 2) / Math.sqrt((fitW / node.width) ** 2 + (fitH / node.height) ** 2);
+  } else {
+    s = Math.min(node.width * (1 - pad * 2) / fitW, node.height * (1 - pad * 2) / fitH);
+  }
 
   // Apply lensView adjustments — must match drawLens() in renderer exactly.
   // Expanded form of: ox = baseOx*userZoom + centerX*(1-userZoom) + panX
@@ -71,7 +85,7 @@ function computeLensTransform(
   const totalS = s * userZoom;
   const ox = node.x + node.width  / 2 - (fitX + fitW / 2) * totalS + (lv?.panX ?? 0);
   const oy = node.y + node.height / 2 - (fitY + fitH / 2) * totalS + (lv?.panY ?? 0);
-  return { s: totalS, ox, oy };
+  return { s: totalS, ox, oy, fitWidth: fitW, fitHeight: fitH };
 }
 
 /** Find which node in the given scene tree hosts the specified inner scene id. */
@@ -224,9 +238,6 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
 
   // Auto-exit zoom debounce
   const lastAutoExitTimeRef = useRef(0);
-  // Guards auto-exit: must have been "fully inside" (innerRatio ≥ ENTER_THRESHOLD) since last entry
-  // before auto-exit can fire. Prevents spurious immediate exit right after entering.
-  const wasFullyInsideRef = useRef(false);
 
   // Zoom focal point — updated by onZoom, used by auto-enter to pick correct node
   const zoomFocusRef = useRef<{ worldX: number; worldY: number; screenX: number; screenY: number; at: number } | null>(null);
@@ -493,12 +504,13 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
           parentNodeId: node.id,
           label: nodeLabel(node),
           viewportWhenLeft: innerVp,
-          lensTransform: lt ?? undefined,
+          lensTransform: lt ? { s: lt.s, ox: lt.ox, oy: lt.oy } : undefined,
+          fitWidth: lt?.fitWidth,
+          fitHeight: lt?.fitHeight,
         },
       ];
 
       lastAutoExitTimeRef.current = Date.now();
-      wasFullyInsideRef.current = false;
       prevScaleRef.current = innerVp.scale;
       setSceneStack(newStack);
       setScene(updatedNode.innerScene!);
@@ -1427,8 +1439,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
 
     for (const node of currentScene.nodes) {
       if (!node.innerScene) continue;
-      // Skip unbounded empty scenes — no fit rect can be computed, can't crossfade
-      if (node.innerScene.nodes.length === 0 && !node.innerScene.bounds) continue;
+      // Empty unbounded scenes now have an implicit node-sized fit rect, so they can be auto-entered
       // Only consider nodes that contain the focal point (with tolerance)
       const containsFocal =
         focalWorldX >= node.x - tolWorld && focalWorldX <= node.x + node.width + tolWorld &&
@@ -1491,18 +1502,22 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
         } else if (currentScene.nodes.length > 0) {
           const bb = getBoundingBox(currentScene.nodes);
           innerRatio = Math.min(bb.width * viewport.scale / w, bb.height * viewport.scale / h);
+        } else if (currentLevel.fitWidth && currentLevel.fitHeight) {
+          // Empty unbounded scene: use the implicit fit dimensions saved at entry time
+          innerRatio = Math.min(
+            currentLevel.fitWidth  * viewport.scale / w,
+            currentLevel.fitHeight * viewport.scale / h,
+          );
         } else {
           innerRatio = 0;
         }
-        // Track whether the user has zoomed "fully inside" since entry
-        if (innerRatio >= ENTER_THRESHOLD) wasFullyInsideRef.current = true;
-
         const now = Date.now();
         const pastCooldown = now - lastAutoExitTimeRef.current > 200;
 
-        // Inner content ≤ EXIT_THRESHOLD → parent node covers full screen → invisible switch
-        // wasFullyInsideRef guards against spurious immediate exit right after entering
-        if (innerRatio < EXIT_THRESHOLD && pastCooldown && wasFullyInsideRef.current) {
+        // Inner content ≤ EXIT_THRESHOLD → parent node covers full screen → invisible switch.
+        // zoomingOut gate prevents firing right after entry (when innerRatio ≈ EXIT_THRESHOLD)
+        // because at that moment the user is still zooming IN, not OUT.
+        if (innerRatio < EXIT_THRESHOLD && pastCooldown && zoomingOut) {
           lastAutoExitTimeRef.current = now;
           const vp2 = viewportRef.current;
           const parentScale = vp2.scale / lt.s;

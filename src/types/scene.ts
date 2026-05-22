@@ -175,6 +175,10 @@ export interface SceneLevel {
   enterFromNodeRect?: { x: number; y: number; width: number; height: number; scale: number };
   // Stored at entry time so exit can compute the seamless inverse viewport
   lensTransform?: { s: number; ox: number; oy: number };
+  // Fit rectangle dimensions (inner-world coords) used by drawLens / computeLensTransform.
+  // Needed for innerRatio computation during exit for empty unbounded scenes.
+  fitWidth?: number;
+  fitHeight?: number;
 }
 
 export interface Asset {

@@ -898,10 +898,11 @@ function drawLens(ctx: CanvasRenderingContext2D, node: SceneNode, viewportScale:
   // ── Scale inner content to fit node bounds (5 % margin) ──────────────────
   if (hasFitRect) {
     const pad = 0.05;
-    const s = Math.min(
-      node.width  * (1 - pad * 2) / fitW,
-      node.height * (1 - pad * 2) / fitH,
-    );
+    // For circle nodes the fit rectangle must fit inside the ellipse (axis-aligned),
+    // otherwise content corners get cropped by the circular clip.
+    const s = isCircleLens
+      ? (1 - pad * 2) / Math.sqrt((fitW / node.width) ** 2 + (fitH / node.height) ** 2)
+      : Math.min(node.width * (1 - pad * 2) / fitW, node.height * (1 - pad * 2) / fitH);
     const baseCx = node.x + node.width  / 2;
     const baseCy = node.y + node.height / 2;
     const baseOx = baseCx - (fitX + fitW / 2) * s;
