@@ -13,8 +13,8 @@ import { transformPathCoords, parsePathToAnchors, anchorsToPath, PathAnchor } fr
 import { mirroredPaths, mirroredPoints, symmetryTransforms } from '../engine/symmetry';
 
 /** Returns the 8 selection handle positions (world coords) for a node, matching renderer layout. */
-function getResizeHandlePositions(node: import('../types/scene').SceneNode): [number, number][] {
-  const p = 4; // padding matching drawSelectionHandles
+function getResizeHandlePositions(node: import('../types/scene').SceneNode, scale: number): [number, number][] {
+  const p = 4 / scale; // padding matching drawSelectionHandles (screen-pixel constant)
   const x = node.x - p, y = node.y - p;
   const w = node.width + p * 2, h = node.height + p * 2;
   return [
@@ -716,7 +716,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
         const selNode = sceneRef.current.nodes.find(n => n.id === Array.from(selIds)[0]);
         if (selNode) {
           const hitR = Math.max(6, 8 / viewportRef.current.scale);
-          const handles = getResizeHandlePositions(selNode);
+          const handles = getResizeHandlePositions(selNode, viewportRef.current.scale);
           for (let i = 0; i < handles.length; i++) {
             const [hx, hy] = handles[i];
             if (Math.abs(worldX - hx) <= hitR && Math.abs(worldY - hy) <= hitR) {

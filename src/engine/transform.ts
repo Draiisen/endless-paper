@@ -1,7 +1,7 @@
 import { Viewport } from '../types/scene';
 
-export const MIN_SCALE = 0.001;
-export const MAX_SCALE = 50000;
+export const MIN_SCALE = 1e-6;
+export const MAX_SCALE = 1e8;
 
 export function worldToScreen(worldX: number, worldY: number, viewport: Viewport): { x: number; y: number } {
   return {

@@ -147,7 +147,7 @@ export function renderScene(
       }
     }
     if (isFinite(minX)) {
-      drawSelectionRectOutline(ctx, minX, minY, maxX - minX, maxY - minY);
+      drawSelectionRectOutline(ctx, minX, minY, maxX - minX, maxY - minY, viewport.scale);
     }
   }
 
@@ -192,13 +192,18 @@ function drawSelectionRectOutline(
   x: number,
   y: number,
   w: number,
-  h: number
+  h: number,
+  scale: number,
 ): void {
   ctx.save();
+  const lw = 1.5 / scale;
+  const pad = 6 / scale;
+  const dash = 8 / scale;
+  const gap = 4 / scale;
   ctx.strokeStyle = '#4a90d9';
-  ctx.lineWidth = 1.5;
-  ctx.setLineDash([8, 4]);
-  ctx.strokeRect(x - 6, y - 6, w + 12, h + 12);
+  ctx.lineWidth = lw;
+  ctx.setLineDash([dash, gap]);
+  ctx.strokeRect(x - pad, y - pad, w + pad * 2, h + pad * 2);
   ctx.setLineDash([]);
   ctx.restore();
 }
@@ -504,9 +509,9 @@ function drawNode(
 
   if (isSelected(selected, node.id)) {
     if (selected instanceof Set && selected.size > 1) {
-      drawMemberHighlight(ctx, node);
+      drawMemberHighlight(ctx, node, viewportScale);
     } else {
-      drawSelectionHandles(ctx, node);
+      drawSelectionHandles(ctx, node, viewportScale);
     }
   }
 
@@ -611,12 +616,14 @@ function drawPortalOutline(ctx: CanvasRenderingContext2D, node: SceneNode, scale
   ctx.restore();
 }
 
-function drawMemberHighlight(ctx: CanvasRenderingContext2D, node: SceneNode): void {
+function drawMemberHighlight(ctx: CanvasRenderingContext2D, node: SceneNode, scale: number): void {
   ctx.save();
+  const lw = 1 / scale;
+  const pad = 2 / scale;
   ctx.strokeStyle = 'rgba(74, 144, 217, 0.7)';
-  ctx.lineWidth = 1;
-  ctx.setLineDash([3, 2]);
-  ctx.strokeRect(node.x - 2, node.y - 2, node.width + 4, node.height + 4);
+  ctx.lineWidth = lw;
+  ctx.setLineDash([3 / scale, 2 / scale]);
+  ctx.strokeRect(node.x - pad, node.y - pad, node.width + pad * 2, node.height + pad * 2);
   ctx.setLineDash([]);
   ctx.restore();
 }
@@ -924,28 +931,35 @@ function drawLens(ctx: CanvasRenderingContext2D, node: SceneNode, viewportScale:
 
   ctx.restore();
 
-  // ── Thin border to frame the lens ─────────────────────────────────────────
+  // ── Thin border to frame the lens (matches node shape) ──────────────────
   ctx.save();
   ctx.strokeStyle = 'rgba(74, 144, 217, 0.6)';
   ctx.lineWidth = 1.5 / viewportScale;
-  ctx.strokeRect(node.x, node.y, node.width, node.height);
+  ctx.beginPath();
+  if (isCircleLens) {
+    ctx.ellipse(node.x + node.width / 2, node.y + node.height / 2, node.width / 2, node.height / 2, 0, 0, Math.PI * 2);
+  } else {
+    ctx.rect(node.x, node.y, node.width, node.height);
+  }
+  ctx.stroke();
   ctx.restore();
 }
 
-function drawSelectionHandles(ctx: CanvasRenderingContext2D, node: SceneNode): void {
-  const padding = 4;
+function drawSelectionHandles(ctx: CanvasRenderingContext2D, node: SceneNode, scale: number): void {
+  const padding = 4 / scale;
   const x = node.x - padding;
   const y = node.y - padding;
   const w = node.width + padding * 2;
   const h = node.height + padding * 2;
+  const lw = 1.5 / scale;
+  const handleSize = 8 / scale;
 
   ctx.strokeStyle = '#4a90d9';
-  ctx.lineWidth = 1.5;
-  ctx.setLineDash([5, 3]);
+  ctx.lineWidth = lw;
+  ctx.setLineDash([5 / scale, 3 / scale]);
   ctx.strokeRect(x, y, w, h);
   ctx.setLineDash([]);
 
-  const handleSize = 8;
   const corners = [
     [x, y], [x + w, y], [x, y + h], [x + w, y + h],
     [x + w / 2, y], [x + w / 2, y + h],
@@ -954,7 +968,7 @@ function drawSelectionHandles(ctx: CanvasRenderingContext2D, node: SceneNode): v
 
   ctx.fillStyle = '#ffffff';
   ctx.strokeStyle = '#4a90d9';
-  ctx.lineWidth = 1.5;
+  ctx.lineWidth = lw;
 
   for (const [cx, cy] of corners) {
     ctx.fillRect(cx - handleSize / 2, cy - handleSize / 2, handleSize, handleSize);
