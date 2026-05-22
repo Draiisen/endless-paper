@@ -831,7 +831,13 @@ function drawLens(ctx: CanvasRenderingContext2D, node: SceneNode, viewportScale:
     ctx.strokeStyle = 'rgba(74, 144, 217, 0.45)';
     ctx.lineWidth = 1.5 / viewportScale;
     ctx.setLineDash([5 / viewportScale, 3 / viewportScale]);
-    ctx.strokeRect(node.x, node.y, node.width, node.height);
+    ctx.beginPath();
+    if (node.type === 'circle') {
+      ctx.ellipse(node.x + node.width / 2, node.y + node.height / 2, node.width / 2, node.height / 2, 0, 0, Math.PI * 2);
+    } else {
+      ctx.rect(node.x, node.y, node.width, node.height);
+    }
+    ctx.stroke();
     ctx.setLineDash([]);
     if (screenW > 40) {
       const sz = Math.max(8, Math.min(13, screenW * 0.055));
@@ -869,13 +875,24 @@ function drawLens(ctx: CanvasRenderingContext2D, node: SceneNode, viewportScale:
 
   ctx.save();
 
+  // ── Build shape path (rect or circle) used for fill + clip ───────────────
+  const isCircleLens = node.type === 'circle';
+  ctx.beginPath();
+  if (isCircleLens) {
+    ctx.ellipse(
+      node.x + node.width / 2, node.y + node.height / 2,
+      node.width / 2, node.height / 2,
+      0, 0, Math.PI * 2,
+    );
+  } else {
+    ctx.rect(node.x, node.y, node.width, node.height);
+  }
+
   // ── Background fill (inner scene's background colour) ────────────────────
   ctx.fillStyle = inner.background || '#ffffff';
-  ctx.fillRect(node.x, node.y, node.width, node.height);
+  ctx.fill();
 
-  // ── Clip drawing to node bounds ───────────────────────────────────────────
-  ctx.beginPath();
-  ctx.rect(node.x, node.y, node.width, node.height);
+  // ── Clip drawing to node shape ────────────────────────────────────────────
   ctx.clip();
 
   // ── Scale inner content to fit node bounds (5 % margin) ──────────────────
