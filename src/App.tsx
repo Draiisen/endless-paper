@@ -1830,7 +1830,7 @@ export default function App({ initialState, settings }: AppProps) {
                 e.preventDefault();
                 const lv = lensNode.lensView ?? { panX: 0, panY: 0, zoom: 1 };
                 const factor = e.deltaY < 0 ? 1.1 : 0.9;
-                handleUpdateSelectedNode({ lensView: { ...lv, zoom: Math.max(0.1, Math.min(10, lv.zoom * factor)) } });
+                handleUpdateSelectedNode({ lensView: { ...lv, zoom: Math.max(0.01, Math.min(1000, lv.zoom * factor)) } });
               }}
             />
             {/* "Done" pill */}

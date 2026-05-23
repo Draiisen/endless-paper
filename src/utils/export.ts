@@ -387,7 +387,7 @@ export function exportToHTML(rootScene: Scene, _sceneStack: SceneLevel[]): strin
     e.preventDefault();
     var delta = -e.deltaY;
     var factor = delta > 0 ? 1.1 : 1/1.1;
-    var newScale = Math.max(0.001, Math.min(50000, viewport.scale * factor));
+    var newScale = Math.max(1e-6, Math.min(1e8, viewport.scale * factor));
     var actualFactor = newScale / viewport.scale;
     viewport.x = e.clientX - (e.clientX - viewport.x) * actualFactor;
     viewport.y = e.clientY - (e.clientY - viewport.y) * actualFactor;
@@ -420,7 +420,7 @@ export function exportToHTML(rootScene: Scene, _sceneStack: SceneLevel[]): strin
       viewport.x += cx - pcx; viewport.y += cy - pcy;
       if (Math.abs(pinchDelta) > 0.5) {
         var factor = pinchDelta > 0 ? 1.02 : 0.98;
-        var ns = Math.max(0.001, Math.min(50000, viewport.scale * factor));
+        var ns = Math.max(1e-6, Math.min(1e8, viewport.scale * factor));
         var af = ns / viewport.scale;
         viewport.x = cx - (cx - viewport.x) * af; viewport.y = cy - (cy - viewport.y) * af;
         viewport.scale = ns;

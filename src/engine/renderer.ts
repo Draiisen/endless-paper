@@ -290,11 +290,12 @@ function drawGrid(
 ): void {
   const scale = viewport.scale;
 
-  let gridSpacing = 50;
-  if (scale < 0.1) gridSpacing = 500;
-  else if (scale < 0.5) gridSpacing = 200;
-  else if (scale < 2) gridSpacing = 100;
-  else if (scale > 10) gridSpacing = 20;
+  // Compute a "nice" world-unit step so grid lines are ~80px apart on screen at any zoom level.
+  const targetPx = 80;
+  const rawStep = targetPx / scale;
+  const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
+  const n = rawStep / mag;
+  const gridSpacing = n < 1.5 ? mag : n < 3.5 ? 2 * mag : n < 7.5 ? 5 * mag : 10 * mag;
 
   const worldLeft = (-viewport.x) / scale;
   const worldTop = (-viewport.y) / scale;
