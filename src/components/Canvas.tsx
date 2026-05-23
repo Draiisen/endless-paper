@@ -4,7 +4,7 @@ import { renderScene, renderLiveStroke, renderLiveShape, imageCache } from '../e
 import {
   createNode, addNode, removeNode, updateNode,
   getNodeAtPoint, ensureInnerScene, generateId,
-  getNodesInRect, getBoundingBox,
+  getNodesInRect, getBoundingBox, computeLensTransform as computeLensTransformShared,
 } from '../engine/scene-graph';
 import { screenToWorld } from '../engine/transform';
 import { useGestures } from '../hooks/useGestures';
@@ -36,57 +36,7 @@ function findSceneById(root: import('../types/scene').Scene, targetId: string): 
   return null;
 }
 
-/** Compute the lens transform (inner-world → world-1 canvas coords) for a node's inner scene.
- * Must match drawLens() in renderer exactly — uses scene.bounds if set, else content bbox,
- * with implicit node-sized bounds for empty unbounded scenes.
- */
-function computeLensTransform(
-  node: import('../types/scene').SceneNode,
-  inner: { nodes: import('../types/scene').SceneNode[]; bounds?: { width: number; height: number } },
-): { s: number; ox: number; oy: number; fitWidth: number; fitHeight: number } | null {
-  let fitX: number, fitY: number, fitW: number, fitH: number;
-
-  if (inner.bounds) {
-    fitX = -inner.bounds.width / 2;
-    fitY = -inner.bounds.height / 2;
-    fitW = inner.bounds.width;
-    fitH = inner.bounds.height;
-  } else if (inner.nodes.length === 0) {
-    // Empty unbounded: implicit fit rectangle matching node's aspect ratio
-    fitX = -node.width / 2;
-    fitY = -node.height / 2;
-    fitW = node.width;
-    fitH = node.height;
-  } else {
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const n of inner.nodes) {
-      minX = Math.min(minX, n.x); minY = Math.min(minY, n.y);
-      maxX = Math.max(maxX, n.x + n.width); maxY = Math.max(maxY, n.y + n.height);
-    }
-    fitX = minX; fitY = minY; fitW = maxX - minX; fitH = maxY - minY;
-    if (fitW <= 0 || fitH <= 0) return null;
-  }
-
-  const pad = 0.05;
-  // For circle/ellipse nodes the fit rectangle must fit inside the ellipse (not the bounding box),
-  // otherwise corners of the content get cropped by the circular clip.
-  // Axis-aligned rectangle (W,H) inscribed in ellipse (a,b): (W/2/a)² + (H/2/b)² = 1
-  let s: number;
-  if (node.type === 'circle') {
-    s = (1 - pad * 2) / Math.sqrt((fitW / node.width) ** 2 + (fitH / node.height) ** 2);
-  } else {
-    s = Math.min(node.width * (1 - pad * 2) / fitW, node.height * (1 - pad * 2) / fitH);
-  }
-
-  // Apply lensView adjustments — must match drawLens() in renderer exactly.
-  // Expanded form of: ox = baseOx*userZoom + centerX*(1-userZoom) + panX
-  const lv = node.lensView;
-  const userZoom = lv?.zoom ?? 1;
-  const totalS = s * userZoom;
-  const ox = node.x + node.width  / 2 - (fitX + fitW / 2) * totalS + (lv?.panX ?? 0);
-  const oy = node.y + node.height / 2 - (fitY + fitH / 2) * totalS + (lv?.panY ?? 0);
-  return { s: totalS, ox, oy, fitWidth: fitW, fitHeight: fitH };
-}
+const computeLensTransform = computeLensTransformShared;
 
 /** Find which node in the given scene tree hosts the specified inner scene id. */
 function findNodeHostingScene(root: import('../types/scene').Scene, targetSceneId: string): import('../types/scene').SceneNode | null {
@@ -1517,10 +1467,15 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
         if (innerRatio < EXIT_THRESHOLD && pastCooldown && zoomingOut) {
           lastAutoExitTimeRef.current = now;
           const vp2 = viewportRef.current;
-          const parentScale = vp2.scale / lt.s;
-          const parentVp: Viewport = { scale: parentScale, x: vp2.x - lt.ox * parentScale, y: vp2.y - lt.oy * parentScale };
+          // Re-compute the lens transform from the current node state — the stored lt.s can be
+          // stale if content was added/removed inside the inner scene after entry.
+          const parentNode = parentEntry.scene.nodes.find(n => n.id === currentLevel.parentNodeId);
+          const freshLt = parentNode ? computeLensTransform(parentNode, currentScene) : null;
+          const activeLt = freshLt ?? lt;
+          const parentScale = vp2.scale / activeLt.s;
+          const parentVp: Viewport = { scale: parentScale, x: vp2.x - activeLt.ox * parentScale, y: vp2.y - activeLt.oy * parentScale };
           // fixedVp bridges the one-frame React state gap — no visible blend
-          crossfadeRef.current = { innerScene: currentScene, outerScene: parentEntry.scene, lt, entering: false, progress: 0, fixedVp: parentVp };
+          crossfadeRef.current = { innerScene: currentScene, outerScene: parentEntry.scene, lt: activeLt, entering: false, progress: 0, fixedVp: parentVp };
           setScene(parentEntry.scene);
           setViewport(parentVp);
           viewportRef.current = parentVp;

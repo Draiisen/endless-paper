@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Scene, ToolType, Viewport, SceneLevel, PersistedState, Asset, Layer, SceneAudio, StartCamera, SymmetryMode, ImageLOD, BrushType } from './types/scene';
-import { createScene, createNode, addNode, ensureLayers, createLayer, buildSceneCatalog, generateId, getBoundingBox } from './engine/scene-graph';
+import { createScene, createNode, addNode, ensureLayers, createLayer, buildSceneCatalog, generateId, getBoundingBox, computeLensTransform as computeLensTransformForNav } from './engine/scene-graph';
 import { Canvas, CanvasHandle } from './components/Canvas';
 import { Toolbar } from './components/Toolbar';
 import { ExportModal } from './components/ExportModal';
@@ -355,18 +355,25 @@ export default function App({ initialState, settings }: AppProps) {
     const targetEntry = updatedStack[index];
     const innerEntry = stack[stack.length - 1];
 
-    // When going back one level, use inverse lens transform to compute parent viewport
-    // (same math as seamless auto-exit). Only applicable when there's a stored lensTransform.
-    const lt = index === stack.length - 2 ? innerEntry.lensTransform : undefined;
+    // When going back one level, use inverse lens transform to compute parent viewport.
+    // Re-compute from current node state to avoid stale lt.s (content may have been added
+    // inside the inner scene after entry, changing the fit rect and scale factor).
+    let exitLt: { s: number; ox: number; oy: number } | undefined;
     let restoredViewport = targetEntry.viewportWhenLeft;
-    if (lt) {
-      const vp2 = viewportRef.current;
-      const parentScale = vp2.scale / lt.s;
-      restoredViewport = {
-        scale: parentScale,
-        x: vp2.x - lt.ox * parentScale,
-        y: vp2.y - lt.oy * parentScale,
-      };
+    if (index === stack.length - 2) {
+      const parentNode = targetEntry.scene.nodes.find(n => n.id === innerEntry.parentNodeId);
+      exitLt = (parentNode ? computeLensTransformForNav(parentNode, innerEntry.scene) : null)
+        ?? innerEntry.lensTransform
+        ?? undefined;
+      if (exitLt) {
+        const vp2 = viewportRef.current;
+        const parentScale = vp2.scale / exitLt.s;
+        restoredViewport = {
+          scale: parentScale,
+          x: vp2.x - exitLt.ox * parentScale,
+          y: vp2.y - exitLt.oy * parentScale,
+        };
+      }
     }
 
     const finalViewport = restoredViewport;
@@ -377,9 +384,9 @@ export default function App({ initialState, settings }: AppProps) {
       setSelectedNodeIds(new Set());
     };
     const handle = canvasHandleRef.current;
-    if (handle && lt) {
+    if (handle && exitLt) {
       // Crossfade exit: inner scene fades out, outer scene fades in over 350ms
-      handle.startExitCrossfade(innerEntry.scene, targetEntry.scene, lt, finishNav);
+      handle.startExitCrossfade(innerEntry.scene, targetEntry.scene, exitLt, finishNav);
     } else {
       finishNav();
     }
