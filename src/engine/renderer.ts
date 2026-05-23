@@ -460,7 +460,7 @@ function drawNode(
     ctx.rotate(anim.rot);
     ctx.scale(anim.scale, anim.scale);
     ctx.translate(-cx, -cy);
-    ctx.globalAlpha = anim.alpha;
+    ctx.globalAlpha *= anim.alpha;
   }
 
   // Nodes with inner scenes become lenses — render up to 2 levels of nesting
@@ -495,7 +495,7 @@ function drawNode(
   }
 
   if (showEnterHint && !viewerMode) {
-    drawEnterHint(ctx, node);
+    drawEnterHint(ctx, node, viewportScale);
   }
 
   // Hotspot badge
@@ -660,20 +660,45 @@ function drawText(ctx: CanvasRenderingContext2D, node: SceneNode): void {
   }
 }
 
-function drawEnterHint(ctx: CanvasRenderingContext2D, node: SceneNode): void {
+function drawEnterHint(ctx: CanvasRenderingContext2D, node: SceneNode, viewportScale: number): void {
   ctx.save();
-  ctx.strokeStyle = 'rgba(74, 144, 217, 0.7)';
-  ctx.fillStyle = 'rgba(74, 144, 217, 0.08)';
-  ctx.lineWidth = 2;
-  ctx.fillRect(node.x, node.y, node.width, node.height);
-  ctx.strokeRect(node.x, node.y, node.width, node.height);
-  const label = 'Enter →';
-  const fontSize = Math.max(12, Math.min(24, Math.min(node.width, node.height) * 0.12));
+  const lw = 2 / viewportScale;
+  const isCircle = node.type === 'circle';
+  const cx = node.x + node.width / 2;
+  const cy = node.y + node.height / 2;
+
+  // Subtle border pulse — follows node shape
+  ctx.strokeStyle = 'rgba(74, 144, 217, 0.75)';
+  ctx.lineWidth = lw;
+  ctx.setLineDash([6 / viewportScale, 3 / viewportScale]);
+  ctx.beginPath();
+  if (isCircle) {
+    ctx.ellipse(cx, cy, node.width / 2, node.height / 2, 0, 0, Math.PI * 2);
+  } else {
+    ctx.rect(node.x, node.y, node.width, node.height);
+  }
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Small badge at bottom-center: "Zoomer pour entrer"
+  const badgeH = Math.max(14, Math.min(22, node.height * 0.09)) / viewportScale;
+  const fontSize = badgeH * 0.72;
+  const label = 'Zoomer pour entrer ↓';
   ctx.font = `${fontSize}px system-ui, sans-serif`;
+  const tw = ctx.measureText(label).width;
+  const pad = badgeH * 0.4;
+  const bx = cx - tw / 2 - pad;
+  const by = node.y + node.height + lw * 2;
+  const bw = tw + pad * 2;
+
+  ctx.fillStyle = 'rgba(74, 144, 217, 0.88)';
+  ctx.beginPath();
+  ctx.roundRect(bx, by, bw, badgeH, badgeH * 0.3);
+  ctx.fill();
+  ctx.fillStyle = '#ffffff';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillStyle = 'rgba(74, 144, 217, 0.9)';
-  ctx.fillText(label, node.x + node.width / 2, node.y + node.height / 2);
+  ctx.fillText(label, cx, by + badgeH / 2);
   ctx.restore();
 }
 
@@ -695,7 +720,8 @@ function applyBrushStyle(ctx: CanvasRenderingContext2D, brushType: BrushType | u
 
 function drawVectorPath(ctx: CanvasRenderingContext2D, vp: VectorPath): void {
   const path2d = getPath2D(vp.d);
-  ctx.globalAlpha = (ctx.globalAlpha) * vp.opacity;
+  ctx.save();
+  ctx.globalAlpha *= vp.opacity;
 
   if (vp.fill && vp.fill !== 'none') {
     ctx.fillStyle = vp.fill;
@@ -708,6 +734,7 @@ function drawVectorPath(ctx: CanvasRenderingContext2D, vp: VectorPath): void {
     applyBrushStyle(ctx, vp.brushType);
     ctx.stroke(path2d);
   }
+  ctx.restore();
 }
 
 export const imageCache = new LRUImageCache(50);

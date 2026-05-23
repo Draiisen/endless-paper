@@ -225,6 +225,8 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   const viewerModeRef = useRef(viewerMode);
   const showReferenceRef = useRef(showReference);
   const activeLayerIdRef = useRef(activeLayerId);
+  // Cached list of lens nodes in the current scene — updated when scene changes, not every frame
+  const lensNodesRef = useRef<SceneNode[]>([]);
   // Symmetry center in world coords — defaults to viewport center
   const symmCenterRef = useRef({ x: 0, y: 0 });
 
@@ -291,7 +293,11 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
     }
   }, [stamps]);
 
-  useEffect(() => { sceneRef.current = scene; needsRenderRef.current = true; }, [scene]);
+  useEffect(() => {
+    sceneRef.current = scene;
+    lensNodesRef.current = scene.nodes.filter(n => !!n.innerScene);
+    needsRenderRef.current = true;
+  }, [scene]);
   useEffect(() => {
     viewportRef.current = viewport;
     needsRenderRef.current = true;
@@ -1442,10 +1448,8 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
     let enterRatio = 0;
     let hintNode: SceneNode | null = null;
 
-    for (const node of currentScene.nodes) {
-      if (!node.innerScene) continue;
-      // Empty unbounded scenes now have an implicit node-sized fit rect, so they can be auto-entered
-      // Only consider nodes that contain the focal point (with tolerance)
+    // Use cached lens nodes (updated on scene change, not every frame)
+    for (const node of lensNodesRef.current) {
       const containsFocal =
         focalWorldX >= node.x - tolWorld && focalWorldX <= node.x + node.width + tolWorld &&
         focalWorldY >= node.y - tolWorld && focalWorldY <= node.y + node.height + tolWorld;
@@ -1455,18 +1459,6 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
       const ratio = Math.min(sw / w, sh / h);
       if (ratio > enterRatio) { enterRatio = ratio; enterNode = node; }
       if (ratio > 0.2 && !hintNode) hintNode = node;
-    }
-    // hint for nodes containing focal (including empty/unbounded — user can still Z into them)
-    if (!hintNode && !enterNode) {
-      for (const node of currentScene.nodes) {
-        if (!node.innerScene) continue;
-        const containsFocal =
-          focalWorldX >= node.x - tolWorld && focalWorldX <= node.x + node.width + tolWorld &&
-          focalWorldY >= node.y - tolWorld && focalWorldY <= node.y + node.height + tolWorld;
-        if (!containsFocal) continue;
-        const ratio = Math.min(node.width * viewport.scale / w, node.height * viewport.scale / h);
-        if (ratio > 0.2) { hintNode = node; break; }
-      }
     }
 
     // Node covers full screen → switch is invisible (outer scene completely hidden)
@@ -1571,7 +1563,7 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
     if (!crossfadeRef.current) {
       if (hintNode) {
         setEnterHintNodeId(hintNode.id);
-        setAutoEnterToast(`Press Z to enter`);
+        setAutoEnterToast('Zoomer pour entrer');
       } else {
         setEnterHintNodeId(null);
         setAutoEnterToast(null);
