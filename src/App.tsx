@@ -1366,8 +1366,15 @@ export default function App({ initialState, settings }: AppProps) {
             <span className="text-accent font-semibold text-sm hidden sm:block flex-shrink-0">✏ Endless Paper</span>
             <div className="w-px h-5 bg-white/20 hidden sm:block flex-shrink-0" />
 
-            {/* Breadcrumb */}
+            {/* Breadcrumb — back arrow + path segments */}
             <div className="flex items-center gap-0.5 flex-1 overflow-x-auto scrollbar-none min-w-0">
+              {sceneStack.length > 1 && (
+                <button
+                  className="text-sm px-2 py-1.5 rounded flex-shrink-0 text-accent font-bold hover:bg-white/10 active:bg-white/20 transition-colors touch-manipulation"
+                  onClick={() => navigateTo(sceneStack.length - 2)}
+                  title="Retour au niveau précédent (Échap)"
+                >←</button>
+              )}
               {sceneStack.map((entry, i) => (
                 <React.Fragment key={i}>
                   {i > 0 && <span className="text-gray-600 text-xs flex-shrink-0">›</span>}
@@ -1611,15 +1618,6 @@ export default function App({ initialState, settings }: AppProps) {
               <span>❓</span><span>Guide & raccourcis</span>
             </button>
           </div>
-        </div>
-      )}
-
-      {/* Back button */}
-      {sceneStack.length > 1 && (
-        <div className="fixed right-4 z-20" style={{ bottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))' }}>
-          <button onClick={() => navigateTo(sceneStack.length - 2)} title="Escape" className="px-3 py-1.5 rounded-lg bg-ink/80 text-white text-xs hover:bg-ink transition-colors backdrop-blur-sm">
-            ← Retour à {sceneStack[sceneStack.length - 2]?.label ?? 'Monde'}
-          </button>
         </div>
       )}
 

@@ -1352,7 +1352,9 @@ export const Canvas = forwardRef<CanvasHandle, CanvasProps>(function Canvas({
   // so nothing from the other scene is visible — the switch is invisible.
   // ENTER: node fills ≥100% of screen (min dimension) → outer scene fully hidden.
   // EXIT:  inner content ≤90% → parent lens node fills ≥100% → inner scene fully hidden.
-  const ENTER_THRESHOLD = 1.0;
+  // ENTER at 1.5× (150% screen fill) so the user can zoom in and see the portal preview
+  // at full-screen size before the auto-transition fires.
+  const ENTER_THRESHOLD = 1.5;
   const EXIT_THRESHOLD  = 0.9;
 
   useEffect(() => {
