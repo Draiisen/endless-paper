@@ -910,34 +910,36 @@ function drawLens(ctx: CanvasRenderingContext2D, node: SceneNode, viewportScale:
 
   ctx.save();
 
-  // ── Build shape path (rect or circle) used for fill + clip ───────────────
+  // ── Build shape path, fill background, clip to shape ────────────────────
   const isCircleLens = node.type === 'circle';
-  ctx.beginPath();
-  if (isCircleLens) {
-    ctx.ellipse(
-      node.x + node.width / 2, node.y + node.height / 2,
-      node.width / 2, node.height / 2,
-      0, 0, Math.PI * 2,
-    );
+  const isPathLens = node.type === 'path' && !!node.path?.d;
+  ctx.fillStyle = inner.background || '#ffffff';
+
+  if (isPathLens) {
+    // Use the actual SVG path so the preview follows the drawn shape exactly
+    const p2d = getPath2D(node.path!.d);
+    ctx.fill(p2d);
+    ctx.clip(p2d);
   } else {
-    ctx.rect(node.x, node.y, node.width, node.height);
+    ctx.beginPath();
+    if (isCircleLens) {
+      ctx.ellipse(
+        node.x + node.width / 2, node.y + node.height / 2,
+        node.width / 2, node.height / 2,
+        0, 0, Math.PI * 2,
+      );
+    } else {
+      ctx.rect(node.x, node.y, node.width, node.height);
+    }
+    ctx.fill();
+    ctx.clip();
   }
 
-  // ── Background fill (inner scene's background colour) ────────────────────
-  ctx.fillStyle = inner.background || '#ffffff';
-  ctx.fill();
-
-  // ── Clip drawing to node shape ────────────────────────────────────────────
-  ctx.clip();
-
-  // ── Scale inner content to fit node bounds (5 % margin) ──────────────────
+  // ── Cover: scale inner content so it fills the portal (clip handles overflow) ────
   if (hasFitRect) {
-    const pad = 0.05;
-    // For circle nodes the fit rectangle must fit inside the ellipse (axis-aligned),
-    // otherwise content corners get cropped by the circular clip.
-    const s = isCircleLens
-      ? (1 - pad * 2) / Math.sqrt((fitW / node.width) ** 2 + (fitH / node.height) ** 2)
-      : Math.min(node.width * (1 - pad * 2) / fitW, node.height * (1 - pad * 2) / fitH);
+    // Cover scaling: like CSS object-fit:cover — content fills the portal completely.
+    // The portal clip region (ellipse or rect) hides any overflow, so no white border shows.
+    const s = Math.max(node.width / fitW, node.height / fitH);
     const baseCx = node.x + node.width  / 2;
     const baseCy = node.y + node.height / 2;
     const baseOx = baseCx - (fitX + fitW / 2) * s;
@@ -963,13 +965,17 @@ function drawLens(ctx: CanvasRenderingContext2D, node: SceneNode, viewportScale:
   ctx.save();
   ctx.strokeStyle = 'rgba(74, 144, 217, 0.6)';
   ctx.lineWidth = 1.5 / viewportScale;
-  ctx.beginPath();
-  if (isCircleLens) {
-    ctx.ellipse(node.x + node.width / 2, node.y + node.height / 2, node.width / 2, node.height / 2, 0, 0, Math.PI * 2);
+  if (isPathLens) {
+    ctx.stroke(getPath2D(node.path!.d));
   } else {
-    ctx.rect(node.x, node.y, node.width, node.height);
+    ctx.beginPath();
+    if (isCircleLens) {
+      ctx.ellipse(node.x + node.width / 2, node.y + node.height / 2, node.width / 2, node.height / 2, 0, 0, Math.PI * 2);
+    } else {
+      ctx.rect(node.x, node.y, node.width, node.height);
+    }
+    ctx.stroke();
   }
-  ctx.stroke();
   ctx.restore();
 }
 
