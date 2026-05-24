@@ -251,7 +251,7 @@ export function buildSceneCatalog(rootScene: Scene): SceneCatalogEntry[] {
       }
     }
   };
-  walk(rootScene, [], ['World']);
+  walk(rootScene, [], ['Monde']);
   return out;
 }
 

@@ -27,7 +27,7 @@ function makeInitialViewport(): Viewport {
 }
 
 function createInitialSceneStack(scene: Scene, vp: Viewport): SceneLevel[] {
-  return [{ scene, parentNodeId: '', label: 'World', viewportWhenLeft: vp }];
+  return [{ scene, parentNodeId: '', label: 'Monde', viewportWhenLeft: vp }];
 }
 
 /** Re-link a scene stack bottom-up so each parent embeds its child's updated innerScene. */
@@ -554,7 +554,7 @@ export default function App({ initialState, settings }: AppProps) {
       setSceneStack(createInitialSceneStack(root, targetViewport));
       return;
     }
-    const newStack: SceneLevel[] = [{ scene: root, parentNodeId: '', label: 'World', viewportWhenLeft: targetViewport }];
+    const newStack: SceneLevel[] = [{ scene: root, parentNodeId: '', label: 'Monde', viewportWhenLeft: targetViewport }];
     let current = root;
     for (const nodeId of scenePath) {
       const node = current.nodes.find(n => n.id === nodeId);
@@ -1618,7 +1618,7 @@ export default function App({ initialState, settings }: AppProps) {
       {sceneStack.length > 1 && (
         <div className="fixed right-4 z-20" style={{ bottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))' }}>
           <button onClick={() => navigateTo(sceneStack.length - 2)} title="Escape" className="px-3 py-1.5 rounded-lg bg-ink/80 text-white text-xs hover:bg-ink transition-colors backdrop-blur-sm">
-            ← Back to {sceneStack[sceneStack.length - 2]?.label ?? 'World'}
+            ← Retour à {sceneStack[sceneStack.length - 2]?.label ?? 'Monde'}
           </button>
         </div>
       )}
@@ -1954,7 +1954,7 @@ export default function App({ initialState, settings }: AppProps) {
       {showWorldSizeSheet && (
         <WorldSizeSheet
           sceneBounds={scene.bounds}
-          sceneLabel={sceneStack[sceneStack.length - 1]?.label ?? 'World'}
+          sceneLabel={sceneStack[sceneStack.length - 1]?.label ?? 'Monde'}
           onSelect={handleWorldSizeSelect}
           onClose={() => setShowWorldSizeSheet(false)}
         />
