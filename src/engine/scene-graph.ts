@@ -337,13 +337,9 @@ export function computeLensTransform(
     if (fitW <= 0 || fitH <= 0) return null;
   }
 
-  const pad = 0.05;
-  let s: number;
-  if (node.type === 'circle') {
-    s = (1 - pad * 2) / Math.sqrt((fitW / node.width) ** 2 + (fitH / node.height) ** 2);
-  } else {
-    s = Math.min(node.width * (1 - pad * 2) / fitW, node.height * (1 - pad * 2) / fitH);
-  }
+  // Cover scaling — must match drawLens() in renderer.ts exactly, otherwise the
+  // zoom-through landing viewport won't line up with the portal preview.
+  const s = Math.max(node.width / fitW, node.height / fitH);
 
   const lv = node.lensView;
   const userZoom = lv?.zoom ?? 1;
